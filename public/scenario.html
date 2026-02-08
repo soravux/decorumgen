@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Decorum Scenario</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1><a href="/" style="color:inherit;text-decoration:none">Decorum</a></h1>
+      <p class="subtitle" id="scenarioInfo">Loading scenario...</p>
+    </header>
+
+    <!-- Player Picker (shown when no ?p= param) -->
+    <div id="playerPicker" class="card" hidden>
+      <h2>Choose Your Player</h2>
+      <p>Select which player you are to see your conditions.</p>
+      <div class="player-pick-grid" id="pickGrid"></div>
+    </div>
+
+    <!-- Share URL -->
+    <div id="shareSection" class="share-bar" hidden>
+      <span>Share with other players:</span>
+      <input type="text" id="shareUrl" readonly>
+      <button class="btn-small" id="copyBtn">Copy</button>
+    </div>
+
+    <!-- Board -->
+    <div id="boardSection" hidden>
+      <h2>Initial Board</h2>
+      <div class="house-grid" id="houseGrid"></div>
+    </div>
+
+    <!-- Conditions -->
+    <div id="condSection" class="card" hidden>
+      <h2 id="condTitle">Your Conditions</h2>
+      <div id="condList" class="cond-list"></div>
+    </div>
+
+    <!-- Shared Conditions from other players -->
+    <div id="sharedSection" class="card" hidden>
+      <h2>Shared Conditions</h2>
+      <div id="sharedList">
+        <p class="empty-msg">No conditions shared with you yet.</p>
+      </div>
+    </div>
+
+    <!-- Solution Reveal -->
+    <div id="revealSection" hidden>
+      <button class="btn-secondary" id="revealBtn">Reveal Solution</button>
+      <div id="solutionArea" hidden>
+        <h2>Solution Board</h2>
+        <div class="house-grid" id="solutionGrid"></div>
+        <h3>Perturbation Log</h3>
+        <ol id="pertLog" class="pert-log"></ol>
+      </div>
+    </div>
+
+    <div id="errorSection" class="error-msg" hidden></div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

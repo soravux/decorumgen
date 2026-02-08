@@ -1,0 +1,169 @@
+/* ── Reset & Base ─────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #f5f0eb; color: #2c2420; line-height: 1.6;
+  min-height: 100vh;
+}
+.container { max-width: 720px; margin: 0 auto; padding: 1.5rem 1rem; }
+
+/* ── Header ──────────────────────────────────────────── */
+header { text-align: center; margin-bottom: 1.5rem; }
+header h1 { font-size: 2.2rem; font-weight: 700; letter-spacing: 0.04em; color: #6b3a2a; }
+.subtitle { color: #8a7060; font-size: 1rem; }
+
+/* ── Card ────────────────────────────────────────────── */
+.card {
+  background: #fff; border-radius: 12px; padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.07); margin-bottom: 1.5rem;
+}
+.card h2 { font-size: 1.3rem; color: #6b3a2a; margin-bottom: 0.8rem; }
+
+/* ── Form ────────────────────────────────────────────── */
+label { display: block; font-weight: 600; margin: 0.8rem 0 0.3rem; font-size: 0.9rem; color: #5a4a3a; }
+input[type="number"] {
+  width: 100%; padding: 0.5rem 0.7rem; border: 1px solid #d0c4b8;
+  border-radius: 8px; font-size: 0.95rem; background: #faf8f5;
+}
+input[type="number"]:focus { outline: none; border-color: #b08060; }
+
+.btn-group { display: flex; gap: 0.5rem; }
+.btn-opt {
+  flex: 1; padding: 0.5rem; border: 2px solid #d0c4b8; border-radius: 8px;
+  background: #faf8f5; font-size: 0.95rem; cursor: pointer; font-weight: 500;
+  transition: all 0.15s;
+}
+.btn-opt:hover { border-color: #b08060; }
+.btn-opt.active { background: #6b3a2a; color: #fff; border-color: #6b3a2a; }
+
+.btn-primary {
+  display: block; width: 100%; padding: 0.75rem; margin-top: 1.2rem;
+  background: #6b3a2a; color: #fff; border: none; border-radius: 10px;
+  font-size: 1.05rem; font-weight: 600; cursor: pointer; transition: background 0.15s;
+}
+.btn-primary:hover { background: #8a4a35; }
+.btn-primary:disabled { background: #bbb; cursor: not-allowed; }
+
+.btn-secondary {
+  display: inline-block; padding: 0.5rem 1.2rem; margin: 1rem 0;
+  background: transparent; color: #8a7060; border: 2px solid #d0c4b8;
+  border-radius: 8px; font-size: 0.9rem; cursor: pointer; transition: all 0.15s;
+}
+.btn-secondary:hover { border-color: #8a7060; color: #5a4a3a; }
+
+.btn-small {
+  padding: 0.35rem 0.8rem; background: #6b3a2a; color: #fff;
+  border: none; border-radius: 6px; font-size: 0.85rem; cursor: pointer;
+}
+.btn-small:hover { background: #8a4a35; }
+
+.advanced { margin-top: 0.8rem; }
+.advanced summary { cursor: pointer; color: #8a7060; font-size: 0.9rem; }
+.advanced summary:hover { color: #6b3a2a; }
+
+.error-msg { color: #c0392b; font-size: 0.9rem; margin-top: 0.5rem; }
+
+/* ── Share Bar ───────────────────────────────────────── */
+.share-bar {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  background: #e8f5e9; border-radius: 10px; padding: 0.7rem 1rem; margin-bottom: 1.5rem;
+  font-size: 0.9rem;
+}
+.share-bar input {
+  flex: 1; min-width: 200px; padding: 0.35rem 0.6rem;
+  border: 1px solid #c8e6c9; border-radius: 6px; background: #fff; font-size: 0.85rem;
+}
+
+/* ── Player Picker ───────────────────────────────────── */
+.player-pick-grid { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem; }
+.player-pick-btn {
+  flex: 1; min-width: 100px; padding: 1rem; border: 2px solid #d0c4b8;
+  border-radius: 10px; background: #faf8f5; text-align: center;
+  cursor: pointer; transition: all 0.15s; font-weight: 600;
+}
+.player-pick-btn:hover { border-color: #6b3a2a; background: #f0e8e0; }
+.player-pick-btn .pname { font-size: 1.1rem; }
+.player-pick-btn .psub { font-size: 0.8rem; color: #8a7060; font-weight: 400; }
+
+/* ── House Grid ──────────────────────────────────────── */
+.house-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1.5rem;
+}
+.floor-label {
+  grid-column: 1 / -1; font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
+  color: #8a7060; letter-spacing: 0.08em; padding: 0.2rem 0;
+}
+.room-card {
+  border-radius: 10px; padding: 0.8rem; border: 2px solid #e0d8d0;
+  background: #fff; position: relative;
+}
+.room-name { font-weight: 700; font-size: 0.95rem; margin-bottom: 0.1rem; }
+.room-wall { font-size: 0.8rem; margin-bottom: 0.5rem; }
+.room-wall .wall-dot {
+  display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+  vertical-align: middle; margin-right: 4px; border: 1px solid rgba(0,0,0,0.15);
+}
+.room-obj { font-size: 0.82rem; padding: 0.15rem 0; display: flex; align-items: center; gap: 0.4rem; }
+.room-obj .obj-dot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 3px;
+  border: 1px solid rgba(0,0,0,0.15); flex-shrink: 0;
+}
+.room-obj.empty { color: #bbb; font-style: italic; }
+
+/* Color dots */
+.color-red    { background: #e74c3c; }
+.color-yellow { background: #f1c40f; }
+.color-blue   { background: #3498db; }
+.color-green  { background: #27ae60; }
+
+/* Wall color tint on room cards */
+.wall-red    { border-color: #e8a8a0; background: #fdf5f4; }
+.wall-yellow { border-color: #e8d8a0; background: #fdfbf4; }
+.wall-blue   { border-color: #a0c8e8; background: #f4f8fd; }
+.wall-green  { border-color: #a0d8b0; background: #f4fdf6; }
+
+/* ── Conditions List ─────────────────────────────────── */
+.cond-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.cond-row {
+  display: flex; align-items: baseline; gap: 0.5rem;
+  padding: 0.4rem 0; border-bottom: 1px solid #f0ebe5;
+}
+.cond-row:last-child { border-bottom: none; }
+.cond-num { font-weight: 700; color: #8a7060; min-width: 1.5em; flex-shrink: 0; }
+.cond-text { flex: 1; font-size: 0.95rem; }
+
+/* Share buttons next to each condition */
+.share-btns { display: flex; gap: 0.25rem; flex-shrink: 0; margin-left: 0.5rem; }
+.share-btn {
+  padding: 0.15rem 0.45rem; font-size: 0.72rem; font-weight: 600;
+  border: 1.5px solid #d0c4b8; border-radius: 5px; background: #faf8f5;
+  color: #8a7060; cursor: pointer; transition: all 0.15s; line-height: 1.2;
+}
+.share-btn:hover { border-color: #6b3a2a; color: #6b3a2a; }
+.share-btn.active {
+  background: #6b3a2a; color: #fff; border-color: #6b3a2a;
+}
+.share-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Shared Conditions Section ───────────────────────── */
+.shared-from-header {
+  font-weight: 700; font-size: 0.9rem; color: #6b3a2a;
+  margin-top: 0.6rem; margin-bottom: 0.2rem;
+}
+.shared-from-header:first-child { margin-top: 0; }
+.shared-item {
+  font-size: 0.92rem; padding: 0.3rem 0.6rem; margin: 0.2rem 0;
+  background: #fdf8f3; border-left: 3px solid #d0b898; border-radius: 0 6px 6px 0;
+}
+.empty-msg { color: #bbb; font-style: italic; font-size: 0.9rem; }
+
+/* ── Perturbation Log ────────────────────────────────── */
+.pert-log { padding-left: 1.5rem; font-size: 0.85rem; color: #666; }
+.pert-log li { margin: 0.25rem 0; }
+
+/* ── Responsive ──────────────────────────────────────── */
+@media (max-width: 500px) {
+  .house-grid { grid-template-columns: 1fr; }
+  .btn-group { flex-wrap: wrap; }
+  header h1 { font-size: 1.8rem; }
+}

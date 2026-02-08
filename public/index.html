@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Decorum Scenario Generator</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Decorum</h1>
+      <p class="subtitle">Scenario Generator</p>
+    </header>
+
+    <form id="genForm" class="card">
+      <h2>New Scenario</h2>
+
+      <label>Number of Players</label>
+      <div class="btn-group" id="playerBtns">
+        <button type="button" class="btn-opt active" data-val="2">2</button>
+        <button type="button" class="btn-opt" data-val="3">3</button>
+        <button type="button" class="btn-opt" data-val="4">4</button>
+      </div>
+      <input type="hidden" id="numPlayers" value="2">
+
+      <label>Difficulty</label>
+      <div class="btn-group" id="diffBtns">
+        <button type="button" class="btn-opt" data-val="easy">Easy</button>
+        <button type="button" class="btn-opt active" data-val="medium">Medium</button>
+        <button type="button" class="btn-opt" data-val="hard">Hard</button>
+      </div>
+      <input type="hidden" id="difficulty" value="medium">
+
+      <details class="advanced">
+        <summary>Advanced Settings</summary>
+        <label>Seed (optional)</label>
+        <input type="number" id="seed" placeholder="Leave blank for random">
+        <label>Perturbations</label>
+        <input type="number" id="numPerturbations" placeholder="Auto (from difficulty)">
+        <label>Min violations per player</label>
+        <input type="number" id="minViol" value="1" min="0" max="5">
+      </details>
+
+      <button type="submit" class="btn-primary" id="generateBtn">Generate Scenario</button>
+      <div id="error" class="error-msg" hidden></div>
+    </form>
+  </div>
+
+  <script>
+    // Button group toggling
+    document.querySelectorAll('.btn-group').forEach(group => {
+      group.addEventListener('click', e => {
+        const btn = e.target.closest('.btn-opt');
+        if (!btn) return;
+        group.querySelectorAll('.btn-opt').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        // Update hidden input
+        const input = group.nextElementSibling;
+        if (input && input.type === 'hidden') input.value = btn.dataset.val;
+      });
+    });
+
+    document.getElementById('genForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('generateBtn');
+      const errEl = document.getElementById('error');
+      errEl.hidden = true;
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+
+      try {
+        const body = {
+          numPlayers: parseInt(document.getElementById('numPlayers').value),
+          difficulty: document.getElementById('difficulty').value,
+        };
+        const seedVal = document.getElementById('seed').value;
+        if (seedVal) body.seed = parseInt(seedVal);
+
+        const numPert = document.getElementById('numPerturbations').value;
+        const minViol = document.getElementById('minViol').value;
+        if (numPert || minViol) {
+          body.perturbation = {};
+          if (numPert) body.perturbation.numPerturbations = parseInt(numPert);
+          if (minViol) body.perturbation.minViolPerPlayer = parseInt(minViol);
+        }
+
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || 'Generation failed');
+        const { token } = await res.json();
+        window.location.href = `/scenario/${token}?p=1`;
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.hidden = false;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Generate Scenario';
+      }
+    });
+  </script>
+</body>
+</html>
