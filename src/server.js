@@ -22,12 +22,13 @@ function genToken() {
 /** POST /api/generate — create a new scenario */
 app.post('/api/generate', (req, res) => {
   try {
-    const { numPlayers = 2, difficulty = 'medium', seed, perturbation } = req.body || {};
+    const { numPlayers = 2, difficulty = 'medium', seed, perturbation, warmCoolBias } = req.body || {};
     const np = Math.min(4, Math.max(2, parseInt(numPlayers, 10) || 2));
     const diff = DIFFICULTY_PARAMS[difficulty] ? difficulty : 'medium';
     const s = seed != null ? parseInt(seed, 10) : null;
+    const wcBias = warmCoolBias != null ? parseFloat(warmCoolBias) : undefined;
 
-    const scenario = generateScenario({ numPlayers: np, difficulty: diff, seed: s, perturbation });
+    const scenario = generateScenario({ numPlayers: np, difficulty: diff, seed: s, perturbation, warmCoolBias: wcBias });
     scenario.shares = []; // mutable sharing state
     const token = genToken();
     store.set(token, scenario);

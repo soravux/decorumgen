@@ -40,6 +40,9 @@
         <input type="number" id="numPerturbations" placeholder="Auto (from difficulty)">
         <label>Min violations per player</label>
         <input type="number" id="minViol" value="1" min="0" max="5">
+        <label>Warm / Cool color bias: <span id="wcBiasLabel">1.5</span></label>
+        <input type="range" id="warmCoolBias" min="0.5" max="3.0" step="0.1" value="1.5">
+        <div class="range-hint">Higher = more warm/cool color constraints</div>
       </details>
 
       <button type="submit" class="btn-primary" id="generateBtn">Generate Scenario</button>
@@ -61,6 +64,13 @@
       });
     });
 
+    // Warm/cool bias slider label
+    const wcSlider = document.getElementById('warmCoolBias');
+    const wcLabel = document.getElementById('wcBiasLabel');
+    if (wcSlider && wcLabel) {
+      wcSlider.addEventListener('input', () => { wcLabel.textContent = parseFloat(wcSlider.value).toFixed(1); });
+    }
+
     document.getElementById('genForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = document.getElementById('generateBtn');
@@ -73,6 +83,7 @@
         const body = {
           numPlayers: parseInt(document.getElementById('numPlayers').value),
           difficulty: document.getElementById('difficulty').value,
+          warmCoolBias: parseFloat(document.getElementById('warmCoolBias').value),
         };
         const seedVal = document.getElementById('seed').value;
         if (seedVal) body.seed = parseInt(seedVal);

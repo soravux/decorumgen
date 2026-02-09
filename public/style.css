@@ -60,6 +60,8 @@ input[type="number"]:focus { outline: none; border-color: #b08060; }
 .advanced { margin-top: 0.8rem; }
 .advanced summary { cursor: pointer; color: #8a7060; font-size: 0.9rem; }
 .advanced summary:hover { color: #6b3a2a; }
+input[type="range"] { width: 100%; margin: 0.3rem 0; accent-color: #6b3a2a; }
+.range-hint { font-size: 0.78rem; color: #8a7060; margin-top: 0.15rem; }
 
 .error-msg { color: #c0392b; font-size: 0.9rem; margin-top: 0.5rem; }
 
