@@ -1068,7 +1068,7 @@ function generateInitialState(rng, solution, assignments, config) {
 // SECTION 10: TOP-LEVEL SCENARIO GENERATION
 // ================================================================
 
-const PLAYER_VOICES = ['formal', 'casual', 'passionate', 'neutral'];
+const PLAYER_VOICES = ['formal', 'casual', 'passionate', 'neutral', 'formal'];
 
 function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, perturbation = {}, warmCoolBias } = {}) {
   const params = DIFFICULTY_PARAMS[difficulty] || DIFFICULTY_PARAMS.medium;
