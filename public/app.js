@@ -6,6 +6,37 @@
   const WALL_CLASS  = { Red: 'wall-red', Yellow: 'wall-yellow', Blue: 'wall-blue', Green: 'wall-green' };
   const OBJ_LABELS  = { lamp: 'Lamp', wallHanging: 'Wall Hanging', curio: 'Curio' };
 
+  // Symbol SVG for styles/object types (order: longer phrases first)
+  const TERM_SYMBOLS = [
+    [/\b(wall hangings?)\b/gi, 'wall_hangings.svg'],
+    [/\b(lamps?)\b/gi, 'lamps.svg'],
+    [/\b(curios?)\b/gi, 'curios.svg'],
+    [/\b(modern)\b/gi, 'modern.svg'],
+    [/\b(antique)\b/gi, 'antique.svg'],
+    [/\b(retro)\b/gi, 'retro.svg'],
+    [/\b(unusual)\b/gi, 'unusual.svg'],
+  ];
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /** Wraps color words (red, yellow, blue, green) in spans with matching text color. Run on escaped text. */
+  function injectColorSpans(text) {
+    return text.replace(/\b(red|yellow|blue|green)\b/gi, (match) =>
+      '<span class="text-color text-color-' + match.toLowerCase() + '">' + match + '</span>');
+  }
+
+  /** Injects symbol img after each style/object-type mention, then color spans. Returns HTML string. */
+  function injectTermSymbols(text) {
+    let out = escapeHtml(text);
+    out = injectColorSpans(out);
+    for (const [pattern, symbol] of TERM_SYMBOLS) {
+      out = out.replace(pattern, (match) => match + '<img src="/img/' + symbol + '" class="term-symbol" alt="">');
+    }
+    return out;
+  }
+
   // ── Extract token and player from URL ─────────────────────
   const pathParts = window.location.pathname.split('/');
   const token = pathParts[pathParts.length - 1];
@@ -84,7 +115,7 @@
         const logEl = document.getElementById('pertLog');
         sol.perturbationLog.forEach(desc => {
           const li = document.createElement('li');
-          li.textContent = desc;
+          li.innerHTML = injectTermSymbols(desc);
           logEl.appendChild(li);
         });
         document.getElementById('solutionArea').hidden = false;
@@ -125,7 +156,7 @@
 
     const wallEl = document.createElement('div');
     wallEl.className = 'room-wall';
-    wallEl.innerHTML = `<span class="wall-dot ${COLOR_CLASS[room.wallColor] || ''}"></span>${room.wallColor} walls`;
+    wallEl.innerHTML = `<span class="wall-dot ${COLOR_CLASS[room.wallColor] || ''}"></span>${injectColorSpans(escapeHtml(room.wallColor))} walls`;
     card.appendChild(wallEl);
 
     for (const [key, label] of Object.entries(OBJ_LABELS)) {
@@ -133,10 +164,10 @@
       const el = document.createElement('div');
       if (obj) {
         el.className = 'room-obj';
-        el.innerHTML = `<span class="obj-dot ${COLOR_CLASS[obj.color] || ''}"></span>${label}: ${obj.style} ${obj.color}`;
+        el.innerHTML = `<span class="obj-dot ${COLOR_CLASS[obj.color] || ''}"></span>${injectTermSymbols(`${label}: ${obj.style} ${obj.color}`)}`;
       } else {
         el.className = 'room-obj empty';
-        el.textContent = `${label}: (empty)`;
+        el.innerHTML = injectTermSymbols(`${label}: (empty)`);
       }
       card.appendChild(el);
     }
@@ -161,7 +192,7 @@
 
       const text = document.createElement('span');
       text.className = 'cond-text';
-      text.textContent = c.text;
+      text.innerHTML = injectTermSymbols(c.text);
       row.appendChild(text);
 
       // Share buttons — one per other player
@@ -252,7 +283,7 @@
       for (const text of texts) {
         const item = document.createElement('div');
         item.className = 'shared-item';
-        item.textContent = text;
+        item.innerHTML = injectTermSymbols(text);
         container.appendChild(item);
       }
     }
