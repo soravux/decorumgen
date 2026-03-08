@@ -46,6 +46,54 @@
   let scenarioData = null;
   let pollInterval = null;
 
+  // ── Player names (server-synced via poll; localStorage fallback for initial load) ──────────────
+  let serverPlayerNames = {};
+  const NAMES_KEY = 'decorum-player-names-';
+
+  function getPlayerNames() {
+    return { ...serverPlayerNames };
+  }
+
+  function setPlayerName(playerId, name) {
+    const trimmed = typeof name === 'string' ? name.trim().slice(0, 50) : '';
+    serverPlayerNames[String(playerId)] = trimmed;
+    try {
+      const local = JSON.parse(localStorage.getItem(NAMES_KEY + token) || '{}');
+      local[String(playerId)] = trimmed;
+      localStorage.setItem(NAMES_KEY + token, JSON.stringify(local));
+    } catch (e) { /* ignore */ }
+  }
+
+  /** Persist name to server so other clients see it; updates serverPlayerNames on success. */
+  async function savePlayerNameToServer(playerId, name) {
+    const trimmed = typeof name === 'string' ? name.trim().slice(0, 50) : '';
+    try {
+      const res = await fetch(`/api/scenario/${token}/name`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId, name: trimmed }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.playerNames) serverPlayerNames = { ...data.playerNames };
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  /** First 3 letters for share button label, or P1/P2 if no name. */
+  function getShareButtonLabel(playerId) {
+    const name = serverPlayerNames[String(playerId)];
+    if (name && name.trim()) return name.trim().slice(0, 3);
+    return 'P' + playerId;
+  }
+
+  /** Full display name for titles / "From X:". */
+  function getPlayerDisplayName(playerId) {
+    const name = serverPlayerNames[String(playerId)];
+    if (name && name.trim()) return name.trim();
+    return 'Player ' + playerId;
+  }
+
   // ── Fetch scenario data ───────────────────────────────────
   async function loadScenario() {
     try {
@@ -56,6 +104,10 @@
         return;
       }
       scenarioData = await res.json();
+      try {
+        const raw = localStorage.getItem(NAMES_KEY + token);
+        if (raw) serverPlayerNames = { ...serverPlayerNames, ...JSON.parse(raw) };
+      } catch (e) { /* ignore */ }
       renderScenario(scenarioData);
     } catch (e) {
       showError('Failed to load scenario.');
@@ -92,8 +144,12 @@
     if (selectedPlayer && selectedPlayer >= 1 && selectedPlayer <= data.numPlayers) {
       // Show this player's conditions with share buttons
       const player = data.players[selectedPlayer - 1];
+      setupYourNameInput(selectedPlayer);
       renderConditions(player, data.numPlayers);
       document.getElementById('condSection').hidden = false;
+
+      // Your name section (below share bar)
+      document.getElementById('yourNameSection').hidden = false;
 
       // Show shared conditions section and start polling
       document.getElementById('sharedSection').hidden = false;
@@ -174,10 +230,28 @@
     return card;
   }
 
+  function setupYourNameInput(currentPlayerId) {
+    const input = document.getElementById('yourNameInput');
+    input.placeholder = 'Player ' + currentPlayerId;
+    input.value = serverPlayerNames[String(currentPlayerId)] || '';
+    input.removeEventListener('input', input._nameHandler);
+    input._nameHandler = () => {
+      const name = input.value.trim();
+      setPlayerName(currentPlayerId, name);
+      savePlayerNameToServer(currentPlayerId, name);
+      if (scenarioData && selectedPlayer) {
+        const player = scenarioData.players[selectedPlayer - 1];
+        renderConditions(player, scenarioData.numPlayers);
+      }
+    };
+    input.addEventListener('input', input._nameHandler);
+    input.addEventListener('blur', input._nameHandler);
+  }
+
   // ── Render conditions with share buttons ──────────────────
   function renderConditions(player, numPlayers) {
     document.getElementById('condTitle').textContent =
-      `Your Conditions - Player ${player.id}`;
+      'Your Conditions - ' + getPlayerDisplayName(player.id);
     const list = document.getElementById('condList');
     list.innerHTML = '';
 
@@ -195,7 +269,7 @@
       text.innerHTML = injectTermSymbols(c.text);
       row.appendChild(text);
 
-      // Share buttons — one per other player
+      // Share buttons — one per other player (first 3 letters of name)
       const btns = document.createElement('span');
       btns.className = 'share-btns';
       for (let p = 1; p <= numPlayers; p++) {
@@ -204,8 +278,8 @@
         btn.className = 'share-btn';
         btn.dataset.condIdx = i;
         btn.dataset.toPlayer = p;
-        btn.textContent = `P${p}`;
-        btn.title = `Share with Player ${p}`;
+        btn.textContent = getShareButtonLabel(p);
+        btn.title = 'Share with ' + getPlayerDisplayName(p);
         btn.addEventListener('click', () => toggleShare(player.id, i, p, btn));
         btns.appendChild(btn);
       }
@@ -239,6 +313,18 @@
       const res = await fetch(`/api/scenario/${token}/shares/${selectedPlayer}`);
       const data = await res.json();
 
+      if (data.playerNames && typeof data.playerNames === 'object') {
+        serverPlayerNames = { ...data.playerNames };
+        if (scenarioData) {
+          const player = scenarioData.players[selectedPlayer - 1];
+          renderConditions(player, scenarioData.numPlayers);
+        }
+        renderSharedConditions(data.sharedWithYou);
+        const nameInput = document.getElementById('yourNameInput');
+        if (nameInput && document.activeElement !== nameInput)
+          nameInput.value = serverPlayerNames[String(selectedPlayer)] || '';
+      }
+
       // Update outgoing share button states
       document.querySelectorAll('.share-btn').forEach(btn => {
         const ci = parseInt(btn.dataset.condIdx);
@@ -246,15 +332,13 @@
         const sharedTo = data.sharedByYou && data.sharedByYou[ci];
         const isShared = sharedTo && sharedTo.includes(tp);
         if (!sharedTo || sharedTo.length === 0) {
-          // Condition not shared with anyone: keep buttons unhighlighted
           btn.classList.remove('active');
         } else {
           btn.classList.toggle('active', isShared);
         }
       });
 
-      // Update incoming shared conditions
-      renderSharedConditions(data.sharedWithYou);
+      if (!data.playerNames) renderSharedConditions(data.sharedWithYou);
     } catch (e) {
       // silently fail
     }
@@ -278,7 +362,7 @@
     for (const [from, texts] of Object.entries(grouped)) {
       const header = document.createElement('div');
       header.className = 'shared-from-header';
-      header.textContent = `From Player ${from}:`;
+      header.textContent = 'From ' + getPlayerDisplayName(parseInt(from, 10)) + ':';
       container.appendChild(header);
       for (const text of texts) {
         const item = document.createElement('div');

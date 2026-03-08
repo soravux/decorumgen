@@ -30,6 +30,7 @@ app.post('/api/generate', (req, res) => {
 
     const scenario = generateScenario({ numPlayers: np, difficulty: diff, seed: s, perturbation, warmCoolBias: wcBias });
     scenario.shares = []; // mutable sharing state
+    scenario.playerNames = {}; // { "1": "Alice", "2": "Bob", ... }
     const token = genToken();
     store.set(token, scenario);
 
@@ -110,7 +111,23 @@ app.get('/api/scenario/:token/shares/:player', (req, res) => {
     }
   }
 
-  res.json({ sharedWithYou, sharedByYou });
+  res.json({ sharedWithYou, sharedByYou, playerNames: scenario.playerNames || {} });
+});
+
+/** POST /api/scenario/:token/name — set a player's display name (syncs to other clients via poll) */
+app.post('/api/scenario/:token/name', (req, res) => {
+  const scenario = store.get(req.params.token);
+  if (!scenario) return res.status(404).json({ error: 'Scenario not found' });
+
+  const { playerId, name } = req.body || {};
+  if (playerId == null) return res.status(400).json({ error: 'Missing playerId' });
+
+  const pid = String(parseInt(playerId, 10));
+  if (!scenario.players[parseInt(pid, 10) - 1]) return res.status(400).json({ error: 'Invalid playerId' });
+
+  if (!scenario.playerNames) scenario.playerNames = {};
+  scenario.playerNames[pid] = typeof name === 'string' ? name.trim().slice(0, 50) : '';
+  res.json({ playerNames: scenario.playerNames });
 });
 
 // ── Serve scenario.html for /scenario/:token routes ───────────
