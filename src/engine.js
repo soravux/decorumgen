@@ -697,6 +697,62 @@ function generateCandidates(state) {
 }
 
 // ================================================================
+// SECTION 5b: SOLUTION SPACE SAMPLING (for tight constraint assignment)
+// ================================================================
+
+/** Generate one random board (uniform-ish over walls and object placements). */
+function sampleRandomBoard(rng, numPlayers) {
+  const state = new HouseState(numPlayers);
+  for (const rn of state.roomNames) {
+    state.rooms[rn].wallColor = rng.choice(COLORS);
+    for (const ot of OBJECT_TYPES) {
+      if (rng.random() < 0.6) {
+        state.rooms[rn].setObject(ot, makeToken(ot, rng.choice(STYLES)));
+      }
+    }
+  }
+  return state;
+}
+
+/** One board by random walk from T (steps in 1..maxSteps). */
+function sampleBoardByWalk(rng, T, maxSteps) {
+  const state = T.deepCopy();
+  const steps = rng.randint(1, Math.max(1, maxSteps));
+  const allowed = ['paint', 'swap', 'remove', 'add'];
+  for (let i = 0; i < steps; i++) {
+    const moves = listAllMoves(state, allowed);
+    if (!moves.length) break;
+    const m = rng.choice(moves);
+    applyMove(state, m);
+  }
+  return state;
+}
+
+/** Pool of boards: walkFraction from random walk from T, rest random. Used to proxy |S|. */
+function sampleBoardPool(rng, T, poolSize, walkFraction = 0.8) {
+  const pool = [];
+  const nWalk = Math.floor(poolSize * walkFraction);
+  const nRandom = poolSize - nWalk;
+  for (let i = 0; i < nWalk; i++) {
+    pool.push(sampleBoardByWalk(rng, T, 12));
+  }
+  for (let i = 0; i < nRandom; i++) {
+    pool.push(sampleRandomBoard(rng, T.numPlayers));
+  }
+  return pool;
+}
+
+/** Count how many states in pool satisfy all conditions. */
+function countSatisfying(pool, conditions) {
+  if (!conditions.length) return pool.length;
+  let count = 0;
+  for (const state of pool) {
+    if (conditions.every(c => evalC(c, state))) count++;
+  }
+  return count;
+}
+
+// ================================================================
 // SECTION 6: NATURAL LANGUAGE RENDERING
 // ================================================================
 // Terminology: "objects" = wall hanging, curio, lamp. "Features" = objects + wall color.
@@ -896,8 +952,194 @@ const WARM_COOL_TYPES = new Set([
 ]);
 
 function constraintKey(c) {
-  return c.ctype + '::' + Object.entries(c.params).sort().map(([k, v]) => `${k}=${v}`).join(',');
+  return c.ctype + '::' + Object.entries(c.params || {}).sort().map(([k, v]) => `${k}=${v}`).join(',');
 }
+
+function roomInArea(room, area, layout) {
+  return layout && layout[area] && layout[area].includes(room);
+}
+
+function areaIsSingleRoom(area, layout) {
+  return layout && Array.isArray(layout[area]) && layout[area].length === 1;
+}
+
+/** Returns true if c1 and c2 are redundant (same or one implies the other). Used to avoid assigning redundant conditions. */
+function constraintsRedundant(c1, c2, layout) {
+  if (constraintKey(c1) === constraintKey(c2)) return true;
+  const t1 = c1.ctype, t2 = c2.ctype;
+  const p1 = c1.params || {}, p2 = c2.params || {};
+
+  if (t1 === 'NO_COLOR_OBJECTS_IN_HOUSE' && p1.color) {
+    if (t2 === 'ROOM_NO_COLOR_OBJECT' && p2.color === p1.color) return true;
+    if (t2 === 'AREA_NO_COLOR_OBJECT' && p2.color === p1.color) return true;
+  }
+  if (t2 === 'NO_COLOR_OBJECTS_IN_HOUSE' && p2.color) {
+    if (t1 === 'ROOM_NO_COLOR_OBJECT' && p1.color === p2.color) return true;
+    if (t1 === 'AREA_NO_COLOR_OBJECT' && p1.color === p2.color) return true;
+  }
+
+  if (layout) {
+    if (t1 === 'AREA_NO_COLOR_OBJECT' && p1.area && p1.color) {
+      const roomsInArea = layout[p1.area];
+      if (Array.isArray(roomsInArea) && t2 === 'ROOM_NO_COLOR_OBJECT' && p2.room && p2.color === p1.color && roomsInArea.includes(p2.room)) return true;
+    }
+    if (t2 === 'AREA_NO_COLOR_OBJECT' && p2.area && p2.color) {
+      const roomsInArea = layout[p2.area];
+      if (Array.isArray(roomsInArea) && t1 === 'ROOM_NO_COLOR_OBJECT' && p1.room && p1.color === p2.color && roomsInArea.includes(p1.room)) return true;
+    }
+    if (t1 === 'AREA_NO_STYLE' && p1.area && p1.style) {
+      const roomsInArea = layout[p1.area];
+      if (Array.isArray(roomsInArea) && t2 === 'ROOM_NO_STYLE' && p2.room && p2.style === p1.style && roomsInArea.includes(p2.room)) return true;
+    }
+    if (t2 === 'AREA_NO_STYLE' && p2.area && p2.style) {
+      const roomsInArea = layout[p2.area];
+      if (Array.isArray(roomsInArea) && t1 === 'ROOM_NO_STYLE' && p1.room && p1.style === p2.style && roomsInArea.includes(p1.room)) return true;
+    }
+    if (t1 === 'AREA_NO_OBJECT_TYPE' && p1.area && p1.objType) {
+      const roomsInArea = layout[p1.area];
+      if (Array.isArray(roomsInArea) && t2 === 'ROOM_NO_OBJECT_TYPE' && p2.room && p2.objType === p1.objType && roomsInArea.includes(p2.room)) return true;
+    }
+    if (t2 === 'AREA_NO_OBJECT_TYPE' && p2.area && p2.objType) {
+      const roomsInArea = layout[p2.area];
+      if (Array.isArray(roomsInArea) && t1 === 'ROOM_NO_OBJECT_TYPE' && p1.room && p1.objType === p2.objType && roomsInArea.includes(p1.room)) return true;
+    }
+
+    if (t1 === 'ROOM_HAS_OBJECT_TYPE' && p1.room && p1.objType && t2 === 'AREA_HAS_OBJECT_TYPE' && p2.area && p2.objType === p1.objType && roomInArea(p1.room, p2.area, layout)) return true;
+    if (t2 === 'ROOM_HAS_OBJECT_TYPE' && p2.room && p2.objType && t1 === 'AREA_HAS_OBJECT_TYPE' && p1.area && p1.objType === p2.objType && roomInArea(p2.room, p1.area, layout)) return true;
+    if (t1 === 'ROOM_HAS_COLOR_OBJECT' && p1.room && p1.color && t2 === 'AREA_HAS_COLOR_OBJECT' && p2.area && p2.color === p1.color && roomInArea(p1.room, p2.area, layout)) return true;
+    if (t2 === 'ROOM_HAS_COLOR_OBJECT' && p2.room && p2.color && t1 === 'AREA_HAS_COLOR_OBJECT' && p1.area && p1.color === p2.color && roomInArea(p2.room, p1.area, layout)) return true;
+    if (t1 === 'ROOM_HAS_STYLE' && p1.room && p1.style && t2 === 'AREA_HAS_STYLE' && p2.area && p2.style === p1.style && roomInArea(p1.room, p2.area, layout)) return true;
+    if (t2 === 'ROOM_HAS_STYLE' && p2.room && p2.style && t1 === 'AREA_HAS_STYLE' && p1.area && p1.style === p2.style && roomInArea(p2.room, p1.area, layout)) return true;
+
+    if (areaIsSingleRoom(p1.area, layout) && p1.area && layout[p1.area][0] === p2.room) {
+      if (t1 === 'AREA_HAS_OBJECT_TYPE' && t2 === 'ROOM_HAS_OBJECT_TYPE' && p1.objType === p2.objType) return true;
+      if (t1 === 'AREA_HAS_COLOR_OBJECT' && t2 === 'ROOM_HAS_COLOR_OBJECT' && p1.color === p2.color) return true;
+      if (t1 === 'AREA_HAS_STYLE' && t2 === 'ROOM_HAS_STYLE' && p1.style === p2.style) return true;
+      if (t1 === 'AREA_NO_OBJECT_TYPE' && t2 === 'ROOM_NO_OBJECT_TYPE' && p1.objType === p2.objType) return true;
+      if (t1 === 'AREA_NO_COLOR_OBJECT' && t2 === 'ROOM_NO_COLOR_OBJECT' && p1.color === p2.color) return true;
+      if (t1 === 'AREA_NO_STYLE' && t2 === 'ROOM_NO_STYLE' && p1.style === p2.style) return true;
+    }
+    if (areaIsSingleRoom(p2.area, layout) && p2.area && layout[p2.area][0] === p1.room) {
+      if (t2 === 'AREA_HAS_OBJECT_TYPE' && t1 === 'ROOM_HAS_OBJECT_TYPE' && p2.objType === p1.objType) return true;
+      if (t2 === 'AREA_HAS_COLOR_OBJECT' && t1 === 'ROOM_HAS_COLOR_OBJECT' && p2.color === p1.color) return true;
+      if (t2 === 'AREA_HAS_STYLE' && t1 === 'ROOM_HAS_STYLE' && p2.style === p1.style) return true;
+      if (t2 === 'AREA_NO_OBJECT_TYPE' && t1 === 'ROOM_NO_OBJECT_TYPE' && p2.objType === p1.objType) return true;
+      if (t2 === 'AREA_NO_COLOR_OBJECT' && t1 === 'ROOM_NO_COLOR_OBJECT' && p2.color === p1.color) return true;
+      if (t2 === 'AREA_NO_STYLE' && t1 === 'ROOM_NO_STYLE' && p2.style === p1.style) return true;
+    }
+  }
+
+  if (t1 === 'ROOM_HAS_OBJECT_TYPE' && p1.objType && t2 === 'AT_LEAST_N_OBJECT_TYPE' && p2.objType === p1.objType && p2.n === 1) return true;
+  if (t2 === 'ROOM_HAS_OBJECT_TYPE' && p2.objType && t1 === 'AT_LEAST_N_OBJECT_TYPE' && p1.objType === p2.objType && p1.n === 1) return true;
+  if (t1 === 'ROOM_HAS_COLOR_OBJECT' && p1.color && t2 === 'AT_LEAST_N_COLOR_OBJECTS' && p2.color === p1.color && p2.n === 1) return true;
+  if (t2 === 'ROOM_HAS_COLOR_OBJECT' && p2.color && t1 === 'AT_LEAST_N_COLOR_OBJECTS' && p1.color === p2.color && p1.n === 1) return true;
+  if (t1 === 'ROOM_HAS_STYLE' && p1.style && t2 === 'AT_LEAST_N_STYLE_OBJECTS' && p2.style === p1.style && p2.n === 1) return true;
+  if (t2 === 'ROOM_HAS_STYLE' && p2.style && t1 === 'AT_LEAST_N_STYLE_OBJECTS' && p1.style === p2.style && p1.n === 1) return true;
+
+  if (t1 === 'EXACTLY_N_ROOMS_COLOR' && p1.n === 0 && p1.color && t2 === 'ROOM_WALL_COLOR_IS_NOT' && p2.color === p1.color) return true;
+  if (t2 === 'EXACTLY_N_ROOMS_COLOR' && p2.n === 0 && p2.color && t1 === 'ROOM_WALL_COLOR_IS_NOT' && p1.color === p2.color) return true;
+
+  if (t1 === 'AREA_HAS_COLOR_OBJECT' && p1.area && p1.color && t2 === 'AT_LEAST_N_COLOR_OBJECTS' && p2.color === p1.color && p2.n === 1) return true;
+  if (t2 === 'AREA_HAS_COLOR_OBJECT' && p2.area && p2.color && t1 === 'AT_LEAST_N_COLOR_OBJECTS' && p1.color === p2.color && p1.n === 1) return true;
+  if (t1 === 'AREA_HAS_OBJECT_TYPE' && p1.area && p1.objType && t2 === 'AT_LEAST_N_OBJECT_TYPE' && p2.objType === p1.objType && p2.n === 1) return true;
+  if (t2 === 'AREA_HAS_OBJECT_TYPE' && p2.area && p2.objType && t1 === 'AT_LEAST_N_OBJECT_TYPE' && p1.objType === p2.objType && p1.n === 1) return true;
+  if (t1 === 'AREA_HAS_STYLE' && p1.area && p1.style && t2 === 'AT_LEAST_N_STYLE_OBJECTS' && p2.style === p1.style && p2.n === 1) return true;
+  if (t2 === 'AREA_HAS_STYLE' && p2.area && p2.style && t1 === 'AT_LEAST_N_STYLE_OBJECTS' && p1.style === p2.style && p1.n === 1) return true;
+
+  return false;
+}
+
+function allRoomNamesFromLayout(layout) {
+  if (!layout || typeof layout !== 'object') return [];
+  const set = new Set();
+  for (const area of Object.keys(layout)) {
+    const rooms = layout[area];
+    if (Array.isArray(rooms)) rooms.forEach(r => set.add(r));
+  }
+  return [...set];
+}
+
+/** Returns indices of constraints that are redundant with the rest of the group. */
+function findGroupRedundancies(constraints, layout) {
+  const redundantIndices = [];
+  const allRooms = allRoomNamesFromLayout(layout);
+
+  for (let i = 0; i < constraints.length; i++) {
+    const c = constraints[i];
+    const t = c.ctype, p = c.params || {};
+
+    if (t === 'NO_COLOR_OBJECTS_IN_HOUSE' && p.color && allRooms.length > 0) {
+      const color = p.color;
+      const hasNoColorInEveryRoom = allRooms.every(room =>
+        constraints.some((c2, j) => j !== i && c2.ctype === 'ROOM_NO_COLOR_OBJECT' && c2.params?.room === room && c2.params?.color === color)
+      );
+      if (hasNoColorInEveryRoom) redundantIndices.push(i);
+    }
+
+    if (t === 'AT_LEAST_N_OBJECT_TYPE' && p.objType != null && p.n != null) {
+      const roomsWith = new Set(
+        constraints.filter((c2, j) => j !== i && c2.ctype === 'ROOM_HAS_OBJECT_TYPE' && c2.params?.objType === p.objType).map(c2 => c2.params?.room).filter(Boolean)
+      );
+      if (roomsWith.size >= p.n) redundantIndices.push(i);
+    }
+
+    if (t === 'AT_LEAST_N_COLOR_OBJECTS' && p.color != null && p.n != null) {
+      const roomsWith = new Set(
+        constraints.filter((c2, j) => j !== i && c2.ctype === 'ROOM_HAS_COLOR_OBJECT' && c2.params?.color === p.color).map(c2 => c2.params?.room).filter(Boolean)
+      );
+      if (roomsWith.size >= p.n) redundantIndices.push(i);
+    }
+
+    if (t === 'AT_LEAST_N_STYLE_OBJECTS' && p.style != null && p.n != null) {
+      const roomsWith = new Set(
+        constraints.filter((c2, j) => j !== i && c2.ctype === 'ROOM_HAS_STYLE' && c2.params?.style === p.style).map(c2 => c2.params?.room).filter(Boolean)
+      );
+      if (roomsWith.size >= p.n) redundantIndices.push(i);
+    }
+  }
+  return redundantIndices;
+}
+
+/** True if adding c to the given list would create redundancy (pair or group). */
+function wouldBeRedundant(c, existingList, layout) {
+  for (const other of existingList) {
+    if (constraintsRedundant(c, other, layout)) return true;
+  }
+  const withNew = [...existingList, c];
+  const groupRedundant = findGroupRedundancies(withNew, layout);
+  return groupRedundant.some(i => i === withNew.length - 1);
+}
+
+/** Heuristic: how much does c reveal about the target? Room-specific = higher leak. */
+function informationLeakScore(c) {
+  if (c.params?.room) return 1.0;
+  if (c.params?.area || c.params?.areaA || c.params?.areaB) return 0.5;
+  return 0.2;
+}
+
+/** Heuristic: apparent conflict with other player's conditions (same zone/room, or positive vs negative about same thing). */
+function apparentConflictScore(c, otherConditions, layout) {
+  let score = 0;
+  const areaOf = (cond) => cond.params?.area || cond.params?.areaA || cond.params?.areaB;
+  const roomOf = (cond) => cond.params?.room;
+  const isPositive = (cond) => !NEGATIVE_TYPES.has(cond.ctype);
+  for (const o of otherConditions) {
+    if (roomOf(c) && roomOf(o) && roomOf(c) === roomOf(o)) score += 1.5;
+    if (areaOf(c) && areaOf(o) && [areaOf(c)].flat().some(a => [areaOf(o)].flat().includes(a))) score += 1.2;
+    if (c.params?.color && o.params?.color && c.params.color === o.params.color && isPositive(c) !== isPositive(o)) score += 1.8;
+    if (c.params?.style && o.params?.style && c.params.style === o.params.style && isPositive(c) !== isPositive(o)) score += 1.5;
+  }
+  return score;
+}
+
+/** High-constraining types (zone, color temp) get a small bonus so we prefer them. */
+const HIGH_CONSTRAINING_TYPES = new Set([
+  CType.AREA_NO_COLOR_OBJECT, CType.AREA_HAS_COLOR_OBJECT,
+  CType.ROOM_WALL_COLOR_IS, CType.ROOM_WALL_COLOR_IS_NOT,
+  CType.AT_LEAST_N_WARM_OBJECTS, CType.AT_LEAST_N_COOL_OBJECTS,
+  CType.MORE_WARM_THAN_COOL, CType.MORE_COOL_THAN_WARM,
+  CType.EXACTLY_N_ROOMS_COLOR, CType.AREA_NO_OBJECT_TYPE, CType.AREA_HAS_OBJECT_TYPE,
+]);
 
 function getReferencedRooms(c, layout) {
   const rooms = new Set();
@@ -909,56 +1151,92 @@ function getReferencedRooms(c, layout) {
 }
 
 function assignConstraints(rng, state, numPlayers, rulesPerPlayer, warmCoolBias = 1.0) {
+  const layout = state.layout;
+  const poolSize = 2000;
+  const pool = sampleBoardPool(rng, state, poolSize, 0.75);
+
   const allCands = generateCandidates(state);
-  // Apply warm/cool bias multiplier
   for (const c of allCands) {
     if (WARM_COOL_TYPES.has(c.ctype)) c.score *= warmCoolBias;
   }
-  // Deduplicate
   const candMap = new Map();
   for (const c of allCands) {
     const k = constraintKey(c);
     if (!candMap.has(k) || c.score > candMap.get(k).score) candMap.set(k, c);
   }
-  const candidates = rng.shuffle([...candMap.values()]);
-  candidates.sort((a, b) => b.score - a.score);
+  const fullCandidates = [...candMap.values()];
+  const keyToIndex = new Map();
+  fullCandidates.forEach((c, j) => keyToIndex.set(constraintKey(c), j));
+  const satisfied = pool.map(s => fullCandidates.map(c => evalC(c, s)));
+
+  function countSatisfyingIndices(indices) {
+    if (!indices.length) return poolSize;
+    let n = 0;
+    for (let i = 0; i < poolSize; i++) if (indices.every(j => satisfied[i][j])) n++;
+    return n;
+  }
 
   const assignments = Array.from({ length: numPlayers }, () => []);
   const usedKeys = new Set();
-  const pRooms = Array.from({ length: numPlayers }, () => new Set());
-  const pTypes = Array.from({ length: numPlayers }, () => new Set());
-  const pHasNeg = Array.from({ length: numPlayers }, () => false);
-  const pHasPos = Array.from({ length: numPlayers }, () => false);
-  const layout = state.layout;
+  const targetTotal = numPlayers * rulesPerPlayer;
 
-  for (let round = 0; round < rulesPerPlayer; round++) {
-    for (let pl = 0; pl < numPlayers; pl++) {
-      if (assignments[pl].length >= rulesPerPlayer) continue;
-      const eligible = candidates.filter(c => !usedKeys.has(constraintKey(c)));
+  while (assignments.flat().length < targetTotal) {
+    const allAssigned = assignments.flat();
+    const assignedIdx = allAssigned.map(c => keyToIndex.get(constraintKey(c))).filter(j => j !== undefined);
+    const S_count = countSatisfyingIndices(assignedIdx);
+    const S_i = assignments.map(list => countSatisfyingIndices(list.map(c => keyToIndex.get(constraintKey(c))).filter(j => j !== undefined)));
+
+    const eligible = fullCandidates.filter(c => {
+      if (usedKeys.has(constraintKey(c))) return false;
+      if (wouldBeRedundant(c, allAssigned, layout)) return false;
+      return true;
+    });
+
+    if (!eligible.length) break;
+
+    let bestScore = -Infinity;
+    let bestC = null;
+    let bestPl = 0;
+
+    for (const c of eligible) {
+      const cIdx = keyToIndex.get(constraintKey(c));
+      const new_S = countSatisfyingIndices(assignedIdx.concat(cIdx));
+      const reduction = S_count - new_S;
+
+      const pl = S_i.indexOf(Math.max(...S_i));
+      const otherConditions = assignments.flatMap((list, i) => (i === pl ? [] : list));
+      const conflict = apparentConflictScore(c, otherConditions, layout);
+      const leak = informationLeakScore(c);
+      const typeBonus = HIGH_CONSTRAINING_TYPES.has(c.ctype) ? 0.5 : 0;
+
+      let score = reduction * 4 + conflict * 0.8 - leak * 0.4 + typeBonus + (c.score || 0) * 0.1;
+      if (NEGATIVE_TYPES.has(c.ctype)) score += 0.4;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestC = c;
+        bestPl = pl;
+      }
+    }
+
+    if (!bestC) break;
+
+    assignments[bestPl].push(bestC);
+    usedKeys.add(constraintKey(bestC));
+  }
+
+  // If we didn't fill all slots (e.g. too many redundancies), fallback: add any remaining non-redundant candidates
+  for (let pl = 0; pl < numPlayers; pl++) {
+    while (assignments[pl].length < rulesPerPlayer) {
+      const flat = assignments.flat();
+      const eligible = fullCandidates.filter(c => !usedKeys.has(constraintKey(c)) && !wouldBeRedundant(c, flat, layout));
       if (!eligible.length) break;
-      const weights = eligible.map(c => {
-        let sc = c.score;
-        const refs = getReferencedRooms(c, layout);
-        const newR = [...refs].filter(r => !pRooms[pl].has(r));
-        if (newR.length) sc += 1.5;
-        if (!pTypes[pl].has(c.ctype)) sc += 1.0;
-        const isNeg = NEGATIVE_TYPES.has(c.ctype);
-        if (isNeg && !pHasNeg[pl]) sc += 1.0;
-        if (!isNeg && !pHasPos[pl]) sc += 1.0;
-        if (refs.size && !newR.length && pRooms[pl].size >= 2) sc -= 2.0;
-        if (pTypes[pl].has(c.ctype)) sc -= 1.5;
-        return Math.max(sc, 0.1);
-      });
-      const idx = rng.weightedIndex(weights);
-      if (idx < 0) break;
-      const chosen = eligible[idx];
+      const chosen = rng.choice(eligible);
       assignments[pl].push(chosen);
       usedKeys.add(constraintKey(chosen));
-      for (const r of getReferencedRooms(chosen, layout)) pRooms[pl].add(r);
-      pTypes[pl].add(chosen.ctype);
-      if (NEGATIVE_TYPES.has(chosen.ctype)) pHasNeg[pl] = true; else pHasPos[pl] = true;
     }
   }
+
   return assignments;
 }
 
@@ -1086,23 +1364,78 @@ function generateInitialState(rng, solution, assignments, config) {
 
 const PLAYER_VOICES = ['formal', 'casual', 'passionate', 'neutral', 'formal'];
 
+const VALIDATE_BFS_CAP = 150000;
+const VALIDATE_BFS_MAX_DEPTH = 14;
+
+/** Returns min depth of any state (other than solution) satisfying all constraints, from initial. */
+function minOtherSolutionDepth(initialState, solutionState, allConstraints, intendedDepth, stateCap = VALIDATE_BFS_CAP) {
+  const solutionFp = solutionState.fingerprint();
+  const maxDepth = Math.min(intendedDepth - 1, VALIDATE_BFS_MAX_DEPTH);
+  if (maxDepth < 0) return { minOther: Infinity, capReached: false };
+
+  let minOther = Infinity;
+  let capReached = false;
+  const visited = new Set([initialState.fingerprint()]);
+  const queue = [{ state: initialState, depth: 0 }];
+
+  while (queue.length > 0 && visited.size <= stateCap) {
+    const { state, depth } = queue.shift();
+    if (depth > maxDepth) continue;
+    if (allConstraints.every(c => evalC(c, state))) {
+      const fp = state.fingerprint();
+      if (fp !== solutionFp && depth < minOther) minOther = depth;
+    }
+    for (const move of listAllMoves(state, ['paint', 'swap', 'remove', 'add'])) {
+      const next = state.deepCopy();
+      applyMove(next, move);
+      const nextFp = next.fingerprint();
+      if (visited.has(nextFp)) continue;
+      visited.add(nextFp);
+      queue.push({ state: next, depth: depth + 1 });
+      if (visited.size > stateCap) { capReached = true; break; }
+    }
+  }
+  return { minOther, capReached };
+}
+
 function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, perturbation = {}, warmCoolBias, includeAssignments = false } = {}) {
   const params = DIFFICULTY_PARAMS[difficulty] || DIFFICULTY_PARAMS.medium;
   const wcBias = warmCoolBias != null ? warmCoolBias : params.warmCoolBias;
   const rng1 = new SeededRandom(seed);
   const solution = generateFinalState(rng1, numPlayers, params);
-  const assignments = assignConstraints(new SeededRandom(seed), solution, numPlayers, params.rulesPerPlayer, wcBias);
 
   const [lo, hi] = params.pertRange;
-  const pertConfig = {
-    numPerturbations: perturbation.numPerturbations || new SeededRandom(seed != null ? seed * 2 : undefined).randint(lo, hi),
-    minViolPerPlayer: perturbation.minViolPerPlayer != null ? perturbation.minViolPerPlayer : 1,
-    allowedTypes: perturbation.allowedTypes || ['paint', 'swap', 'remove', 'add'],
-    typeWeights: perturbation.typeWeights || params.pertWeights,
-    maxAttempts: perturbation.maxAttempts || 30,
-  };
-  const rng2 = new SeededRandom(seed != null ? seed * 3 + 7 : undefined);
-  const { state: initial, moves } = generateInitialState(rng2, solution, assignments, pertConfig);
+  const maxAssignmentRetries = numPlayers === 2 ? 15 : 1;
+  let assignments, initial, moves;
+
+  for (let assignAttempt = 0; assignAttempt < maxAssignmentRetries; assignAttempt++) {
+    const assignSeed = seed != null ? seed + assignAttempt * 100 : undefined;
+    assignments = assignConstraints(new SeededRandom(assignSeed), solution, numPlayers, params.rulesPerPlayer, wcBias);
+    const allConstraintsList = assignments.flat();
+
+    const maxPertRetries = 6;
+    for (let pertAttempt = 0; pertAttempt < maxPertRetries; pertAttempt++) {
+      const pertSeed = seed != null ? seed * 3 + 7 + pertAttempt * 11 + assignAttempt * 17 : undefined;
+      const rng2 = new SeededRandom(pertSeed);
+      const pertConfig = {
+        numPerturbations: perturbation.numPerturbations || new SeededRandom(seed != null ? seed * 2 + pertAttempt + assignAttempt * 13 : undefined).randint(lo, hi),
+        minViolPerPlayer: perturbation.minViolPerPlayer != null ? perturbation.minViolPerPlayer : 1,
+        allowedTypes: perturbation.allowedTypes || ['paint', 'swap', 'remove', 'add'],
+        typeWeights: perturbation.typeWeights || params.pertWeights,
+        maxAttempts: perturbation.maxAttempts || 30,
+      };
+      const result = generateInitialState(rng2, solution, assignments, pertConfig);
+      initial = result.state;
+      moves = result.moves;
+      const intendedDepth = moves.length;
+      const { minOther, capReached } = minOtherSolutionDepth(initial, solution, allConstraintsList, intendedDepth, VALIDATE_BFS_CAP);
+      if (capReached && minOther === Infinity) break;
+      if (minOther >= intendedDepth) break;
+    }
+    const finalIntended = moves.length;
+    const { minOther: finalMinOther } = minOtherSolutionDepth(initial, solution, allConstraintsList, finalIntended, VALIDATE_BFS_CAP);
+    if (finalMinOther >= finalIntended) break;
+  }
 
   const players = assignments.map((rules, i) => {
     const voice = PLAYER_VOICES[i % PLAYER_VOICES.length];
@@ -1133,4 +1466,7 @@ module.exports = {
   listAllMoves,
   applyMove,
   makeToken,
+  constraintKey,
+  constraintsRedundant,
+  findGroupRedundancies,
 };
