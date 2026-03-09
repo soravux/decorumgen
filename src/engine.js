@@ -1367,7 +1367,7 @@ function getReferencedRooms(c, layout) {
 
 function assignConstraints(rng, state, numPlayers, rulesPerPlayer, warmCoolBias = 1.0) {
   const layout = state.layout;
-  const poolSize = 2000;
+  const poolSize = 1000;
   const pool = sampleBoardPool(rng, state, poolSize, 0.75);
 
   const allCands = generateCandidates(state);
@@ -1514,7 +1514,7 @@ function countViolations(state, assignments) {
 
 function generateInitialState(rng, solution, assignments, config) {
   const { numPerturbations = 6, minViolPerPlayer = 1, allowedTypes = ['paint', 'swap', 'remove', 'add'],
-    typeWeights = { paint: 1.0, swap: 1.5, remove: 0.8, add: 0.3 }, maxAttempts = 30 } = config;
+    typeWeights = { paint: 1.0, swap: 1.5, remove: 0.8, add: 0.3 }, maxAttempts = 15 } = config;
 
   let bestState = null, bestMoves = null, bestScore = -1;
 
@@ -1584,8 +1584,8 @@ function generateInitialState(rng, solution, assignments, config) {
 
 const PLAYER_VOICES = ['formal', 'casual', 'passionate', 'neutral', 'formal'];
 
-const VALIDATE_BFS_CAP = 150000;
-const VALIDATE_BFS_MAX_DEPTH = 14;
+const VALIDATE_BFS_CAP = 80000;
+const VALIDATE_BFS_MAX_DEPTH = 10;
 
 /** Returns min depth of any state (other than solution) satisfying all constraints, from initial. */
 function minOtherSolutionDepth(initialState, solutionState, allConstraints, intendedDepth, stateCap = VALIDATE_BFS_CAP) {
@@ -1642,7 +1642,7 @@ function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, 
         minViolPerPlayer: perturbation.minViolPerPlayer != null ? perturbation.minViolPerPlayer : 1,
         allowedTypes: perturbation.allowedTypes || ['paint', 'swap', 'remove', 'add'],
         typeWeights: perturbation.typeWeights || params.pertWeights,
-        maxAttempts: perturbation.maxAttempts || 30,
+        maxAttempts: perturbation.maxAttempts || 15,
       };
       const result = generateInitialState(rng2, solution, assignments, pertConfig);
       initial = result.state;
