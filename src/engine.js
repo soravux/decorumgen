@@ -36,6 +36,16 @@ for (const [ot, map] of Object.entries(STYLE_TO_COLOR)) {
 const ROOMS_2P = ['Bathroom', 'Bedroom', 'Living Room', 'Kitchen'];
 const ROOMS_34P = ['Bedroom A', 'Bedroom B', 'Living Room', 'Kitchen'];
 
+/** Display order of object types per room (matches physical board). */
+const ROOM_OBJECT_ORDER = {
+  'Bathroom':    ['Curio', 'Wall Hanging', 'Lamp'],
+  'Bedroom':     ['Wall Hanging', 'Lamp', 'Curio'],
+  'Bedroom A':   ['Curio', 'Wall Hanging', 'Lamp'],
+  'Bedroom B':   ['Wall Hanging', 'Lamp', 'Curio'],
+  'Living Room': ['Curio', 'Lamp', 'Wall Hanging'],
+  'Kitchen':     ['Lamp', 'Wall Hanging', 'Curio'],
+};
+
 const LAYOUT_2P = {
   upstairs: ['Bathroom', 'Bedroom'], downstairs: ['Living Room', 'Kitchen'],
   'left side': ['Bathroom', 'Living Room'], 'right side': ['Bedroom', 'Kitchen'],
@@ -183,6 +193,14 @@ class HouseState {
   countObjType(ot) { return this.roomNames.filter(rn => this.rooms[rn].getObject(ot) !== null).length; }
   countWarm() { return this.getAllObjects().filter(o => WARM_COLORS.has(o.color)).length; }
   countCool() { return this.getAllObjects().filter(o => COOL_COLORS.has(o.color)).length; }
+  /** Feature = object type + wall color. Room has feature (objType, color) iff it has that object and that wall color. */
+  roomHasFeature(rn, objType, color) {
+    const r = this.rooms[rn];
+    return r && r.getObject(objType) !== null && r.wallColor === color;
+  }
+  countRoomsWithFeature(objType, color) {
+    return this.roomNames.filter(rn => this.roomHasFeature(rn, objType, color)).length;
+  }
 
   // Actions (for perturbation)
   addObject(rn, token) {
@@ -238,7 +256,19 @@ class HouseState {
       rooms: this.roomNames.map(rn => {
         const r = this.rooms[rn];
         const obj = (ot) => { const o = r.getObject(ot); return o ? { style: o.style, color: o.color } : null; };
-        return { name: rn, wallColor: r.wallColor, lamp: obj('Lamp'), wallHanging: obj('Wall Hanging'), curio: obj('Curio') };
+        const order = ROOM_OBJECT_ORDER[rn] || OBJECT_TYPES;
+        const objects = order.map(ot => {
+          const o = r.getObject(ot);
+          return o ? { type: ot, style: o.style, color: o.color } : { type: ot };
+        });
+        return {
+          name: rn,
+          wallColor: r.wallColor,
+          lamp: obj('Lamp'),
+          wallHanging: obj('Wall Hanging'),
+          curio: obj('Curio'),
+          objects,
+        };
       }),
       layout: this.layout,
     };
@@ -292,6 +322,22 @@ const CType = {
   NO_ROOM_MORE_THAN_ONE_STYLE: 'NO_ROOM_MORE_THAN_ONE_STYLE',
   AT_LEAST_N_WARM_OBJECTS: 'AT_LEAST_N_WARM_OBJECTS',
   AT_LEAST_N_COOL_OBJECTS: 'AT_LEAST_N_COOL_OBJECTS',
+  // Features (object type + wall color)
+  ROOM_HAS_FEATURE: 'ROOM_HAS_FEATURE',
+  ROOM_NO_FEATURE: 'ROOM_NO_FEATURE',
+  EXACTLY_N_ROOMS_WITH_FEATURE: 'EXACTLY_N_ROOMS_WITH_FEATURE',
+  // Literal "features" in text (no color as object or wall)
+  AREA_NO_FEATURES_COLOR: 'AREA_NO_FEATURES_COLOR',
+  ROOM_NO_FEATURES_COLOR: 'ROOM_NO_FEATURES_COLOR',
+  // Leftmost/rightmost object in room (by board order)
+  LEFTMOST_OBJECT_IN_ROOM_IS_STYLE: 'LEFTMOST_OBJECT_IN_ROOM_IS_STYLE',
+  LEFTMOST_OBJECT_IN_ROOM_IS_COLOR: 'LEFTMOST_OBJECT_IN_ROOM_IS_COLOR',
+  LEFTMOST_OBJECT_IN_ROOM_IS_TYPE: 'LEFTMOST_OBJECT_IN_ROOM_IS_TYPE',
+  RIGHTMOST_OBJECT_IN_ROOM_IS_STYLE: 'RIGHTMOST_OBJECT_IN_ROOM_IS_STYLE',
+  RIGHTMOST_OBJECT_IN_ROOM_IS_COLOR: 'RIGHTMOST_OBJECT_IN_ROOM_IS_COLOR',
+  RIGHTMOST_OBJECT_IN_ROOM_IS_TYPE: 'RIGHTMOST_OBJECT_IN_ROOM_IS_TYPE',
+  // Inseparable: any room with one feature must have the other
+  INSEPARABLE: 'INSEPARABLE',
   // Spatial
   DIAG_STYLE_NO_WALL_COLOR: 'DIAG_STYLE_NO_WALL_COLOR',
   ADJ_STYLE_NO_WALL_COLOR: 'ADJ_STYLE_NO_WALL_COLOR',
@@ -324,6 +370,46 @@ function areaObjects(s, area) {
   return s.areaRoomNames(area).flatMap(rn => s.rooms[rn].getObjects());
 }
 
+/** Leftmost object in room (first in ROOM_OBJECT_ORDER that exists). Returns { objType, style, color } or null. */
+function getLeftmostObject(s, rn) {
+  const order = ROOM_OBJECT_ORDER[rn] || OBJECT_TYPES;
+  for (const ot of order) {
+    const o = s.rooms[rn].getObject(ot);
+    if (o) return { objType: ot, style: o.style, color: o.color };
+  }
+  return null;
+}
+
+/** Rightmost object in room (last in ROOM_OBJECT_ORDER that exists). */
+function getRightmostObject(s, rn) {
+  const order = ROOM_OBJECT_ORDER[rn] || OBJECT_TYPES;
+  for (let i = order.length - 1; i >= 0; i--) {
+    const ot = order[i];
+    const o = s.rooms[rn].getObject(ot);
+    if (o) return { objType: ot, style: o.style, color: o.color };
+  }
+  return null;
+}
+
+/** Room has a "color feature" (literal sense): that wall color OR that object color. */
+function roomHasColorFeature(s, rn, color) {
+  const r = s.rooms[rn];
+  return r.wallColor === color || r.hasObjColor(color);
+}
+
+/** Abstract feature for inseparable: type is 'objColor'|'emptySlot'|'wallColor'|'objType'|'style'; value for non-emptySlot. */
+function roomHasAbstractFeature(s, rn, feat) {
+  const r = s.rooms[rn];
+  switch (feat.type) {
+    case 'objColor': return r.hasObjColor(feat.value);
+    case 'emptySlot': return r.objectCount() < 3;
+    case 'wallColor': return r.wallColor === feat.value;
+    case 'objType': return r.getObject(feat.value) !== null;
+    case 'style': return r.hasStyle(feat.value);
+    default: return false;
+  }
+}
+
 const EVAL = {
   [CType.ROOM_WALL_COLOR_IS]:     (p, s) => s.rooms[p.room].wallColor === p.color,
   [CType.ROOM_WALL_COLOR_IS_NOT]: (p, s) => s.rooms[p.room].wallColor !== p.color,
@@ -335,6 +421,39 @@ const EVAL = {
   [CType.ROOM_NO_STYLE]:          (p, s) => !s.rooms[p.room].hasStyle(p.style),
   [CType.ROOM_HAS_COLOR_OBJECT]:  (p, s) => s.rooms[p.room].hasObjColor(p.color),
   [CType.ROOM_NO_COLOR_OBJECT]:   (p, s) => !s.rooms[p.room].hasObjColor(p.color),
+  [CType.ROOM_HAS_FEATURE]:      (p, s) => s.roomHasFeature(p.room, p.objType, p.color),
+  [CType.ROOM_NO_FEATURE]:       (p, s) => !s.roomHasFeature(p.room, p.objType, p.color),
+  [CType.EXACTLY_N_ROOMS_WITH_FEATURE]: (p, s) => s.countRoomsWithFeature(p.objType, p.color) === p.n,
+  [CType.AREA_NO_FEATURES_COLOR]: (p, s) =>
+    s.areaRoomNames(p.area).every(rn => !roomHasColorFeature(s, rn, p.color)),
+  [CType.ROOM_NO_FEATURES_COLOR]: (p, s) => !roomHasColorFeature(s, p.room, p.color),
+  [CType.LEFTMOST_OBJECT_IN_ROOM_IS_STYLE]: (p, s) => {
+    const obj = getLeftmostObject(s, p.room);
+    return obj === null || obj.style === p.style;
+  },
+  [CType.LEFTMOST_OBJECT_IN_ROOM_IS_COLOR]: (p, s) => {
+    const obj = getLeftmostObject(s, p.room);
+    return obj === null || obj.color === p.color;
+  },
+  [CType.LEFTMOST_OBJECT_IN_ROOM_IS_TYPE]: (p, s) => {
+    const obj = getLeftmostObject(s, p.room);
+    return obj === null || obj.objType === p.objType;
+  },
+  [CType.RIGHTMOST_OBJECT_IN_ROOM_IS_STYLE]: (p, s) => {
+    const obj = getRightmostObject(s, p.room);
+    return obj === null || obj.style === p.style;
+  },
+  [CType.RIGHTMOST_OBJECT_IN_ROOM_IS_COLOR]: (p, s) => {
+    const obj = getRightmostObject(s, p.room);
+    return obj === null || obj.color === p.color;
+  },
+  [CType.RIGHTMOST_OBJECT_IN_ROOM_IS_TYPE]: (p, s) => {
+    const obj = getRightmostObject(s, p.room);
+    return obj === null || obj.objType === p.objType;
+  },
+  [CType.INSEPARABLE]: (p, s) => s.roomNames.every(rn =>
+    roomHasAbstractFeature(s, rn, { type: p.featureAType, value: p.featureAValue }) ===
+    roomHasAbstractFeature(s, rn, { type: p.featureBType, value: p.featureBValue })),
   [CType.AREA_HAS_OBJECT_TYPE]:   (p, s) => s.areaRoomNames(p.area).some(rn => s.rooms[rn].getObject(p.objType) !== null),
   [CType.AREA_NO_OBJECT_TYPE]:    (p, s) => s.areaRoomNames(p.area).every(rn => s.rooms[rn].getObject(p.objType) === null),
   [CType.AREA_HAS_COLOR_OBJECT]:  (p, s) => areaObjects(s, p.area).some(o => o.color === p.color),
@@ -486,6 +605,19 @@ function generateCandidates(state) {
       if (room.hasObjColor(color)) add(CType.ROOM_HAS_COLOR_OBJECT, { room: rn, color }, 5.0);
       else add(CType.ROOM_NO_COLOR_OBJECT, { room: rn, color }, room.objectCount() > 0 ? 4.0 : 2.0);
     }
+    for (const ot of OBJECT_TYPES) {
+      for (const color of COLORS) {
+        if (state.roomHasFeature(rn, ot, color)) add(CType.ROOM_HAS_FEATURE, { room: rn, objType: ot, color }, 6.0);
+        else add(CType.ROOM_NO_FEATURE, { room: rn, objType: ot, color }, 4.5);
+      }
+    }
+  }
+
+  for (const ot of OBJECT_TYPES) {
+    for (const color of COLORS) {
+      const n = state.countRoomsWithFeature(ot, color);
+      if (n >= 1 && n <= 3) add(CType.EXACTLY_N_ROOMS_WITH_FEATURE, { objType: ot, color, n }, n <= 2 ? 7.0 : 5.5);
+    }
   }
 
   for (const area of AREA_NAMES) {
@@ -503,6 +635,29 @@ function generateCandidates(state) {
     for (const st of STYLES) {
       if (aObjs.some(o => o.style === st)) add(CType.AREA_HAS_STYLE, { area, style: st }, 5.5);
       else add(CType.AREA_NO_STYLE, { area, style: st }, hasObjs ? 5.0 : 2.0);
+    }
+    for (const color of COLORS) {
+      if (arns.every(rn => !roomHasColorFeature(state, rn, color)))
+        add(CType.AREA_NO_FEATURES_COLOR, { area, color }, 7.5);
+    }
+  }
+
+  for (const rn of state.roomNames) {
+    for (const color of COLORS) {
+      if (!roomHasColorFeature(state, rn, color))
+        add(CType.ROOM_NO_FEATURES_COLOR, { room: rn, color }, 6.5);
+    }
+    const leftObj = getLeftmostObject(state, rn);
+    const rightObj = getRightmostObject(state, rn);
+    if (leftObj) {
+      add(CType.LEFTMOST_OBJECT_IN_ROOM_IS_STYLE, { room: rn, style: leftObj.style }, 7.0);
+      add(CType.LEFTMOST_OBJECT_IN_ROOM_IS_COLOR, { room: rn, color: leftObj.color }, 7.0);
+      add(CType.LEFTMOST_OBJECT_IN_ROOM_IS_TYPE, { room: rn, objType: leftObj.objType }, 7.0);
+    }
+    if (rightObj) {
+      add(CType.RIGHTMOST_OBJECT_IN_ROOM_IS_STYLE, { room: rn, style: rightObj.style }, 7.0);
+      add(CType.RIGHTMOST_OBJECT_IN_ROOM_IS_COLOR, { room: rn, color: rightObj.color }, 7.0);
+      add(CType.RIGHTMOST_OBJECT_IN_ROOM_IS_TYPE, { room: rn, objType: rightObj.objType }, 7.0);
     }
   }
 
@@ -693,6 +848,33 @@ function generateCandidates(state) {
     }
   }
 
+  // ── Inseparable (two features with same room set) ────────────────────────
+  const featList = [
+    { type: 'emptySlot', value: undefined },
+    ...COLORS.map(c => ({ type: 'objColor', value: c })),
+    ...COLORS.map(c => ({ type: 'wallColor', value: c })),
+    ...OBJECT_TYPES.map(ot => ({ type: 'objType', value: ot })),
+    ...STYLES.map(st => ({ type: 'style', value: st })),
+  ];
+  const setKey = (rooms) => [...rooms].sort().join(',');
+  const roomSets = new Map();
+  for (const feat of featList) {
+    const rooms = state.roomNames.filter(rn => roomHasAbstractFeature(state, rn, feat));
+    const key = setKey(rooms);
+    if (!roomSets.has(key)) roomSets.set(key, []);
+    roomSets.get(key).push(feat);
+  }
+  for (const feats of roomSets.values()) {
+    for (let i = 0; i < feats.length; i++) {
+      for (let j = i + 1; j < feats.length; j++) {
+        const a = feats[i], b = feats[j];
+        if (a.type === b.type && a.value === b.value) continue;
+        if (evalC({ ctype: CType.INSEPARABLE, params: { featureAType: a.type, featureAValue: a.value, featureBType: b.type, featureBValue: b.value } }, state))
+          add(CType.INSEPARABLE, { featureAType: a.type, featureAValue: a.value, featureBType: b.type, featureBValue: b.value }, 8.0);
+      }
+    }
+  }
+
   return cands;
 }
 
@@ -758,6 +940,15 @@ function countSatisfying(pool, conditions) {
 // Terminology: "objects" = wall hanging, curio, lamp. "Features" = objects + wall color.
 // We use "object(s)" in conditions for anything about lamp/wall hanging/curio; we do not use "items".
 
+function formatAbstractFeature(type, value) {
+  if (type === 'emptySlot') return 'empty slot';
+  if (type === 'objColor') return (value || '').toLowerCase() + ' object';
+  if (type === 'wallColor') return (value || '').toLowerCase() + ' wall';
+  if (type === 'objType') return (value || '').toLowerCase();
+  if (type === 'style') return (value || '').toLowerCase() + ' object';
+  return type;
+}
+
 const NL = {
   [CType.ROOM_WALL_COLOR_IS]:       'The {room} must be painted {color}.',
   [CType.ROOM_WALL_COLOR_IS_NOT]:   'The {room} must not be painted {color}.',
@@ -769,6 +960,18 @@ const NL = {
   [CType.ROOM_NO_STYLE]:            'The {room} must not contain any {styleLower} objects.',
   [CType.ROOM_HAS_COLOR_OBJECT]:    'The {room} must contain at least one {color} object.',
   [CType.ROOM_NO_COLOR_OBJECT]:     'The {room} must not contain any {color} objects.',
+  [CType.ROOM_HAS_FEATURE]:        'The {room} must have the {objTypeLower} in a {color} room.',
+  [CType.ROOM_NO_FEATURE]:         'The {room} must not have the {objTypeLower} in a {color} room.',
+  [CType.EXACTLY_N_ROOMS_WITH_FEATURE]: 'Exactly {n} {roomWord} must have the {objTypeLower} in a {color} room.',
+  [CType.AREA_NO_FEATURES_COLOR]:  'The {area} must not contain {colorLower} features.',
+  [CType.ROOM_NO_FEATURES_COLOR]:  'The {room} must not contain {colorLower} features.',
+  [CType.LEFTMOST_OBJECT_IN_ROOM_IS_STYLE]: 'The leftmost object in the {room} must be {styleLower}.',
+  [CType.LEFTMOST_OBJECT_IN_ROOM_IS_COLOR]:  'The leftmost object in the {room} must be {color}.',
+  [CType.LEFTMOST_OBJECT_IN_ROOM_IS_TYPE]:  'The leftmost object in the {room} must be a {objTypeLower}.',
+  [CType.RIGHTMOST_OBJECT_IN_ROOM_IS_STYLE]: 'The rightmost object in the {room} must be {styleLower}.',
+  [CType.RIGHTMOST_OBJECT_IN_ROOM_IS_COLOR]:  'The rightmost object in the {room} must be {color}.',
+  [CType.RIGHTMOST_OBJECT_IN_ROOM_IS_TYPE]:  'The rightmost object in the {room} must be a {objTypeLower}.',
+  [CType.INSEPARABLE]:             'The {featureA} and the {featureB} are inseparable: any room that contains one must contain the other.',
   [CType.AREA_HAS_OBJECT_TYPE]:     'The {area} must contain a {objTypeLower}.',
   [CType.AREA_NO_OBJECT_TYPE]:      'The {area} must not contain any {objTypePlural}.',
   [CType.AREA_HAS_COLOR_OBJECT]:    'The {area} must contain at least one {color} object.',
@@ -854,6 +1057,9 @@ function renderNL(rng, c, voice = 'neutral') {
     areaA: p.areaA || '', areaB: p.areaB || '',
     roomWord: p.n === 1 ? 'room' : 'rooms',
     objWord: p.n === 1 ? 'object' : 'objects',
+    colorLower: (p.color || '').toLowerCase(),
+    featureA: formatAbstractFeature(p.featureAType, p.featureAValue),
+    featureB: formatAbstractFeature(p.featureBType, p.featureBValue),
   };
   let text = tpl.replace(/\{(\w+)\}/g, (_, k) => subs[k] !== undefined ? subs[k] : `{${k}}`);
 
@@ -933,8 +1139,8 @@ function generateFinalState(rng, numPlayers, params) {
 
 const NEGATIVE_TYPES = new Set([
   CType.ROOM_WALL_COLOR_IS_NOT, CType.ROOM_NO_OBJECT_TYPE, CType.ROOM_NO_STYLE,
-  CType.ROOM_NO_COLOR_OBJECT, CType.AREA_NO_OBJECT_TYPE, CType.AREA_NO_COLOR_OBJECT,
-  CType.AREA_NO_STYLE, CType.NO_COLOR_OBJECTS_IN_HOUSE,
+  CType.ROOM_NO_COLOR_OBJECT, CType.ROOM_NO_FEATURE, CType.AREA_NO_OBJECT_TYPE, CType.AREA_NO_COLOR_OBJECT,
+  CType.AREA_NO_STYLE, CType.AREA_NO_FEATURES_COLOR, CType.ROOM_NO_FEATURES_COLOR, CType.NO_COLOR_OBJECTS_IN_HOUSE,
   // Spatial negative
   CType.DIAG_STYLE_NO_WALL_COLOR, CType.ADJ_STYLE_NO_WALL_COLOR,
   CType.ABOVE_STYLE_NO_WALL_COLOR, CType.BELOW_STYLE_NO_WALL_COLOR,
@@ -1110,10 +1316,19 @@ function wouldBeRedundant(c, existingList, layout) {
   return groupRedundant.some(i => i === withNew.length - 1);
 }
 
+/** Constraint types that get a relaxed leak penalty (features, leftmost/rightmost, inseparable). */
+const REDUCED_LEAK_TYPES = new Set([
+  CType.AREA_NO_FEATURES_COLOR, CType.ROOM_NO_FEATURES_COLOR,
+  CType.LEFTMOST_OBJECT_IN_ROOM_IS_STYLE, CType.LEFTMOST_OBJECT_IN_ROOM_IS_COLOR, CType.LEFTMOST_OBJECT_IN_ROOM_IS_TYPE,
+  CType.RIGHTMOST_OBJECT_IN_ROOM_IS_STYLE, CType.RIGHTMOST_OBJECT_IN_ROOM_IS_COLOR, CType.RIGHTMOST_OBJECT_IN_ROOM_IS_TYPE,
+  CType.INSEPARABLE,
+]);
+
 /** Heuristic: how much does c reveal about the target? Room-specific = higher leak. */
 function informationLeakScore(c) {
-  if (c.params?.room) return 1.0;
-  if (c.params?.area || c.params?.areaA || c.params?.areaB) return 0.5;
+  const reducedLeak = c.ctype && REDUCED_LEAK_TYPES.has(c.ctype);
+  if (c.params?.room) return reducedLeak ? 0.5 : 1.0;
+  if (c.params?.area || c.params?.areaA || c.params?.areaB) return reducedLeak ? 0.3 : 0.5;
   return 0.2;
 }
 
@@ -1237,7 +1452,12 @@ function assignConstraints(rng, state, numPlayers, rulesPerPlayer, warmCoolBias 
     }
   }
 
-  return assignments;
+  // Redistribute constraints evenly across players (same set of constraints, balanced hand sizes)
+  const allConstraints = assignments.flat();
+  const redistributed = Array.from({ length: numPlayers }, () => []);
+  allConstraints.forEach((c, i) => redistributed[i % numPlayers].push(c));
+
+  return redistributed;
 }
 
 // ================================================================

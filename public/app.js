@@ -5,6 +5,7 @@
   const COLOR_CLASS = { Red: 'color-red', Yellow: 'color-yellow', Blue: 'color-blue', Green: 'color-green' };
   const WALL_CLASS  = { Red: 'wall-red', Yellow: 'wall-yellow', Blue: 'wall-blue', Green: 'wall-green' };
   const OBJ_LABELS  = { lamp: 'Lamp', wallHanging: 'Wall Hanging', curio: 'Curio' };
+  const TYPE_TO_KEY = { 'Lamp': 'lamp', 'Wall Hanging': 'wallHanging', 'Curio': 'curio' };
 
   // Symbol SVG for styles/object types (order: longer phrases first)
   const TERM_SYMBOLS = [
@@ -162,21 +163,33 @@
 
     // Solution reveal
     document.getElementById('revealSection').hidden = false;
-    document.getElementById('revealBtn').addEventListener('click', async () => {
-      document.getElementById('revealBtn').hidden = true;
+    const revealBtn = document.getElementById('revealBtn');
+    const solutionArea = document.getElementById('solutionArea');
+    const logEl = document.getElementById('pertLog');
+    revealBtn.addEventListener('click', async () => {
+      if (!solutionArea.hidden) {
+        solutionArea.hidden = true;
+        logEl.innerHTML = '';
+        revealBtn.textContent = 'Reveal Solution';
+        return;
+      }
+      revealBtn.disabled = true;
       try {
         const res = await fetch(`/api/scenario/${token}/solution`);
         const sol = await res.json();
         renderBoard(sol.solutionBoard, 'solutionGrid');
-        const logEl = document.getElementById('pertLog');
+        logEl.innerHTML = '';
         sol.perturbationLog.forEach(desc => {
           const li = document.createElement('li');
           li.innerHTML = injectTermSymbols(desc);
           logEl.appendChild(li);
         });
-        document.getElementById('solutionArea').hidden = false;
+        solutionArea.hidden = false;
+        revealBtn.textContent = 'Hide Solution';
       } catch (e) {
         showError('Failed to load solution.');
+      } finally {
+        revealBtn.disabled = false;
       }
     });
   }
@@ -215,10 +228,12 @@
     wallEl.innerHTML = `<span class="wall-dot ${COLOR_CLASS[room.wallColor] || ''}"></span>${injectColorSpans(escapeHtml(room.wallColor))} walls`;
     card.appendChild(wallEl);
 
-    for (const [key, label] of Object.entries(OBJ_LABELS)) {
-      const obj = room[key];
+    const objEntries = room.objects
+      ? room.objects.map((item) => [TYPE_TO_KEY[item.type] || item.type, item.type, item])
+      : Object.entries(OBJ_LABELS).map(([key, label]) => [key, label, room[key]]);
+    for (const [key, label, obj] of objEntries) {
       const el = document.createElement('div');
-      if (obj) {
+      if (obj && obj.style && obj.color) {
         el.className = 'room-obj';
         el.innerHTML = `<span class="obj-dot ${COLOR_CLASS[obj.color] || ''}"></span>${injectTermSymbols(`${label}: ${obj.style} ${obj.color}`)}`;
       } else {
