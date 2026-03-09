@@ -87,13 +87,13 @@ function getDiagonalPairs(np) {
 }
 
 const DIFFICULTY_PARAMS = {
-  easy:   { numColors: 3, numStyles: 3, totalItems: [5, 7], patternProb: 0.35,
+  easy:   { numColors: 3, numStyles: 3, totalObjects: [5, 7], patternProb: 0.35,
             rulesPerPlayer: 3, pertRange: [3, 5], warmCoolBias: 1.5,
             pertWeights: { paint: 1.0, swap: 1.5, remove: 0.5, add: 0.3 } },
-  medium: { numColors: 3, numStyles: 4, totalItems: [6, 9], patternProb: 0.30,
+  medium: { numColors: 3, numStyles: 4, totalObjects: [6, 9], patternProb: 0.30,
             rulesPerPlayer: 4, pertRange: [5, 8], warmCoolBias: 1.5,
             pertWeights: { paint: 1.0, swap: 1.5, remove: 0.8, add: 0.3 } },
-  hard:   { numColors: 4, numStyles: 4, totalItems: [7, 10], patternProb: 0.25,
+  hard:   { numColors: 4, numStyles: 4, totalObjects: [7, 10], patternProb: 0.25,
             rulesPerPlayer: 4, pertRange: [7, 10], warmCoolBias: 1.5,
             pertWeights: { paint: 1.0, swap: 1.2, remove: 1.0, add: 0.5 } },
 };
@@ -242,6 +242,20 @@ class HouseState {
       }),
       layout: this.layout,
     };
+  }
+
+  /** Rebuild a HouseState from serialized data (for tests). */
+  static deserialize(data) {
+    const state = new HouseState(data.numPlayers);
+    for (const roomData of data.rooms) {
+      const rn = roomData.name;
+      if (!state.rooms[rn]) continue;
+      state.rooms[rn].wallColor = roomData.wallColor;
+      if (roomData.lamp) state.rooms[rn].setObject('Lamp', makeToken('Lamp', roomData.lamp.style));
+      if (roomData.wallHanging) state.rooms[rn].setObject('Wall Hanging', makeToken('Wall Hanging', roomData.wallHanging.style));
+      if (roomData.curio) state.rooms[rn].setObject('Curio', makeToken('Curio', roomData.curio.style));
+    }
+    return state;
   }
 }
 
@@ -685,6 +699,8 @@ function generateCandidates(state) {
 // ================================================================
 // SECTION 6: NATURAL LANGUAGE RENDERING
 // ================================================================
+// Terminology: "objects" = wall hanging, curio, lamp. "Features" = objects + wall color.
+// We use "object(s)" in conditions for anything about lamp/wall hanging/curio; we do not use "items".
 
 const NL = {
   [CType.ROOM_WALL_COLOR_IS]:       'The {room} must be painted {color}.',
@@ -693,16 +709,16 @@ const NL = {
   [CType.ROOM_WALL_COOL]:           'The {room} must be painted a cool color.',
   [CType.ROOM_HAS_OBJECT_TYPE]:     'The {room} must contain a {objTypeLower}.',
   [CType.ROOM_NO_OBJECT_TYPE]:      'The {room} must not contain a {objTypeLower}.',
-  [CType.ROOM_HAS_STYLE]:           'The {room} must contain at least one {styleLower} item.',
-  [CType.ROOM_NO_STYLE]:            'The {room} must not contain any {styleLower} items.',
+  [CType.ROOM_HAS_STYLE]:           'The {room} must contain at least one {styleLower} object.',
+  [CType.ROOM_NO_STYLE]:            'The {room} must not contain any {styleLower} objects.',
   [CType.ROOM_HAS_COLOR_OBJECT]:    'The {room} must contain at least one {color} object.',
   [CType.ROOM_NO_COLOR_OBJECT]:     'The {room} must not contain any {color} objects.',
   [CType.AREA_HAS_OBJECT_TYPE]:     'The {area} must contain a {objTypeLower}.',
   [CType.AREA_NO_OBJECT_TYPE]:      'The {area} must not contain any {objTypePlural}.',
   [CType.AREA_HAS_COLOR_OBJECT]:    'The {area} must contain at least one {color} object.',
   [CType.AREA_NO_COLOR_OBJECT]:     'The {area} must not contain any {color} objects.',
-  [CType.AREA_HAS_STYLE]:           'The {area} must contain at least one {styleLower} item.',
-  [CType.AREA_NO_STYLE]:            'The {area} must not contain any {styleLower} items.',
+  [CType.AREA_HAS_STYLE]:           'The {area} must contain at least one {styleLower} object.',
+  [CType.AREA_NO_STYLE]:            'The {area} must not contain any {styleLower} objects.',
   [CType.EXACTLY_N_ROOMS_COLOR]:    'Exactly {n} {roomWord} must be painted {color}.',
   [CType.AT_LEAST_N_OBJECT_TYPE]:   'There must be at least {n} {objTypePlural} in the house.',
   [CType.AT_LEAST_N_COLOR_OBJECTS]: 'There must be at least {n} {color} {objWord} in the house.',
@@ -712,20 +728,20 @@ const NL = {
   [CType.ALL_OBJECT_TYPE_SAME_STYLE]:'All {objTypePlural} in the house must be {styleLower}.',
   [CType.COLOR_ROOM_COUNT_EQUAL]:   'The number of {colorA} rooms must equal the number of {colorB} rooms.',
   [CType.ROOM_WITH_TYPE_MUST_HAVE_TYPE]: 'Any room with a {objTypeALower} must also contain a {objTypeBLower}.',
-  [CType.NO_ROOM_MORE_THAN_ONE_STYLE]:  'No room may contain more than one {styleLower} item.',
+  [CType.NO_ROOM_MORE_THAN_ONE_STYLE]:  'No room may contain more than one {styleLower} object.',
   [CType.AT_LEAST_N_WARM_OBJECTS]:  'There must be at least {n} warm-colored {objWord} in the house.',
   [CType.AT_LEAST_N_COOL_OBJECTS]:  'There must be at least {n} cool-colored {objWord} in the house.',
   // Spatial
-  [CType.DIAG_STYLE_NO_WALL_COLOR]:   'The room diagonally opposite any room with a {styleLower} item must not be painted {color}.',
-  [CType.ADJ_STYLE_NO_WALL_COLOR]:    'Rooms adjacent to any room containing a {styleLower} item must not be painted {color}.',
-  [CType.ABOVE_STYLE_NO_WALL_COLOR]:  'The room directly above any room with a {styleLower} item must not be painted {color}.',
-  [CType.BELOW_STYLE_NO_WALL_COLOR]:  'The room directly below any room with a {styleLower} item must not be painted {color}.',
-  [CType.BESIDE_STYLE_NO_WALL_COLOR]: 'The room beside any room containing a {styleLower} item must not be painted {color}.',
+  [CType.DIAG_STYLE_NO_WALL_COLOR]:   'The room diagonally opposite any room with a {styleLower} object must not be painted {color}.',
+  [CType.ADJ_STYLE_NO_WALL_COLOR]:    'Rooms adjacent to any room containing a {styleLower} object must not be painted {color}.',
+  [CType.ABOVE_STYLE_NO_WALL_COLOR]:  'The room directly above any room with a {styleLower} object must not be painted {color}.',
+  [CType.BELOW_STYLE_NO_WALL_COLOR]:  'The room directly below any room with a {styleLower} object must not be painted {color}.',
+  [CType.BESIDE_STYLE_NO_WALL_COLOR]: 'The room beside any room containing a {styleLower} object must not be painted {color}.',
   [CType.DIAG_ROOMS_SAME_WALL]:       'Diagonally opposite rooms must be painted the same color.',
   [CType.ADJ_ROOMS_DIFF_WALL]:        'No two adjacent rooms may be painted the same color.',
   // Conditional
-  [CType.WALL_COLOR_FORBIDS_STYLE]:     'Rooms painted {color} must not contain {styleLower} items.',
-  [CType.STYLE_PAIR_FORBIDDEN]:         'No room may contain both a {styleALower} and a {styleBLower} item.',
+  [CType.WALL_COLOR_FORBIDS_STYLE]:     'Rooms painted {color} must not contain {styleLower} objects.',
+  [CType.STYLE_PAIR_FORBIDDEN]:         'No room may contain both a {styleALower} and a {styleBLower} object.',
   [CType.OBJ_TYPE_REQUIRES_WALL_COLOR]: 'Any room with a {objTypeLower} must be painted {color}.',
   [CType.WALL_COLOR_FORBIDS_OBJ_COLOR]: '{wallColor} rooms must not contain {objColor} objects.',
   [CType.OBJ_TYPE_FORBIDS_OBJ_TYPE]:    'Rooms with a {objTypeALower} must not also contain a {objTypeBLower}.',
@@ -811,7 +827,7 @@ function generateFinalState(rng, numPlayers, params) {
   state.roomNames.forEach((rn, i) => { state.rooms[rn].wallColor = wallColors[i]; });
 
   // Place objects
-  const [minI, maxI] = params.totalItems;
+  const [minI, maxI] = params.totalObjects;
   const target = rng.randint(minI, maxI);
   let allSlots = rng.shuffle(state.roomNames.flatMap(rn => OBJECT_TYPES.map(ot => [rn, ot])));
   const themeOt = rng.random() < 0.4 ? rng.choice(OBJECT_TYPES) : null;
@@ -1070,7 +1086,7 @@ function generateInitialState(rng, solution, assignments, config) {
 
 const PLAYER_VOICES = ['formal', 'casual', 'passionate', 'neutral', 'formal'];
 
-function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, perturbation = {}, warmCoolBias } = {}) {
+function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, perturbation = {}, warmCoolBias, includeAssignments = false } = {}) {
   const params = DIFFICULTY_PARAMS[difficulty] || DIFFICULTY_PARAMS.medium;
   const wcBias = warmCoolBias != null ? warmCoolBias : params.warmCoolBias;
   const rng1 = new SeededRandom(seed);
@@ -1097,13 +1113,24 @@ function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, 
     return { id: i + 1, voice, constraints };
   });
 
-  return {
+  const result = {
     numPlayers, difficulty,
     initialBoard: initial.serialize(),
     solutionBoard: solution.serialize(),
     players,
     perturbationLog: moves.map(describeMove),
   };
+  if (includeAssignments) result._assignments = assignments;
+  return result;
 }
 
-module.exports = { generateScenario, DIFFICULTY_PARAMS };
+module.exports = {
+  generateScenario,
+  DIFFICULTY_PARAMS,
+  HouseState,
+  CType,
+  evalC,
+  listAllMoves,
+  applyMove,
+  makeToken,
+};
