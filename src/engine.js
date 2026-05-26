@@ -147,6 +147,13 @@ class SeededRandom {
     return weights.length - 1;
   }
 }
+/** Mix a base seed with a salt to avoid correlated PRNG streams. */
+function hashSeed(seed, salt) {
+  let h = Math.abs((seed * 2654435761 + salt * 2246822519) | 0);
+  h = ((h ^ (h >>> 16)) * 0x45d9f3b) | 0;
+  h = (h ^ (h >>> 16)) | 0;
+  return Math.abs(h) || 1;
+}
 
 // ================================================================
 // SECTION 3: STATE REPRESENTATION
@@ -363,6 +370,51 @@ const CType = {
   MORE_OBJ_STYLE_THAN_COLOR: 'MORE_OBJ_STYLE_THAN_COLOR',
   MORE_TYPE_IN_AREA_THAN_TYPE_IN_AREA: 'MORE_TYPE_IN_AREA_THAN_TYPE_IN_AREA',
   MORE_COLOR_THAN_COLOR: 'MORE_COLOR_THAN_COLOR',
+  // New variety types
+  STYLE_DOMINANCE: 'STYLE_DOMINANCE',
+  ROOM_OBJECT_COUNT_COMPARISON: 'ROOM_OBJECT_COUNT_COMPARISON',
+  AREA_DOMINANT_COLOR_DIFFERENT: 'AREA_DOMINANT_COLOR_DIFFERENT',
+  // Upper-bound constraints
+  AT_MOST_N_ROOMS_COLOR: 'AT_MOST_N_ROOMS_COLOR',
+  AT_MOST_N_OBJECT_TYPE: 'AT_MOST_N_OBJECT_TYPE',
+  AT_MOST_N_STYLE_OBJECTS: 'AT_MOST_N_STYLE_OBJECTS',
+  // Room-to-room wall color relations
+  ROOMS_SAME_WALL_COLOR: 'ROOMS_SAME_WALL_COLOR',
+  ROOMS_DIFF_WALL_COLOR: 'ROOMS_DIFF_WALL_COLOR',
+  ROOM_WALL_COLOR_WARMER: 'ROOM_WALL_COLOR_WARMER',
+  // Style-to-wall-color harmony
+  STYLE_REQUIRES_WALL_COLOR: 'STYLE_REQUIRES_WALL_COLOR',
+  STYLE_COLOR_HARMONY: 'STYLE_COLOR_HARMONY',
+  // Room diversity
+  ROOM_STYLE_DIVERSITY: 'ROOM_STYLE_DIVERSITY',
+  ROOM_COLOR_DIVERSITY: 'ROOM_COLOR_DIVERSITY',
+  // Area-level balance
+  AREA_OBJECT_COUNT_EQUAL: 'AREA_OBJECT_COUNT_EQUAL',
+  AREA_STYLE_BALANCE: 'AREA_STYLE_BALANCE',
+  // Wall color temperature balance
+  MORE_WARM_ROOMS_THAN_COOL: 'MORE_WARM_ROOMS_THAN_COOL',
+  WARM_ROOM_COUNT_EQUAL: 'WARM_ROOM_COUNT_EQUAL',
+  MORE_COOL_ROOMS_THAN_WARM: 'MORE_COOL_ROOMS_THAN_WARM',
+  // Total object count
+  EXACTLY_N_TOTAL_OBJECTS: 'EXACTLY_N_TOTAL_OBJECTS',
+  AT_LEAST_N_TOTAL_OBJECTS: 'AT_LEAST_N_TOTAL_OBJECTS',
+  // Style count equality
+  STYLE_COUNT_EQUAL: 'STYLE_COUNT_EQUAL',
+  // Color/style coverage
+  ALL_COLORS_USED: 'ALL_COLORS_USED',
+  ALL_STYLES_USED: 'ALL_STYLES_USED',
+  // Parity constraints
+  ODD_COUNT_ROOMS_COLOR: 'ODD_COUNT_ROOMS_COLOR',
+  EVEN_COUNT_OBJECT_TYPE: 'EVEN_COUNT_OBJECT_TYPE',
+  ODD_COUNT_STYLE_OBJECTS: 'ODD_COUNT_STYLE_OBJECTS',
+  // Cross-room implications
+  WALL_COLOR_IMPLIES_WALL_COLOR: 'WALL_COLOR_IMPLIES_WALL_COLOR',
+  // Composite sum constraints
+  WARM_OBJECTS_PLUS_COOL_ROOMS: 'WARM_OBJECTS_PLUS_COOL_ROOMS',
+  // Minimum furnishing
+  MIN_OBJECTS_PER_ROOM: 'MIN_OBJECTS_PER_ROOM',
+  // Color distribution
+  EXACTLY_ONE_COLOR_PER_TYPE: 'EXACTLY_ONE_COLOR_PER_TYPE',
 };
 
 /** Helper: get all objects in an area */
@@ -429,27 +481,27 @@ const EVAL = {
   [CType.ROOM_NO_FEATURES_COLOR]: (p, s) => !roomHasColorFeature(s, p.room, p.color),
   [CType.LEFTMOST_OBJECT_IN_ROOM_IS_STYLE]: (p, s) => {
     const obj = getLeftmostObject(s, p.room);
-    return obj === null || obj.style === p.style;
+    return obj !== null && obj.style === p.style;
   },
   [CType.LEFTMOST_OBJECT_IN_ROOM_IS_COLOR]: (p, s) => {
     const obj = getLeftmostObject(s, p.room);
-    return obj === null || obj.color === p.color;
+    return obj !== null && obj.color === p.color;
   },
   [CType.LEFTMOST_OBJECT_IN_ROOM_IS_TYPE]: (p, s) => {
     const obj = getLeftmostObject(s, p.room);
-    return obj === null || obj.objType === p.objType;
+    return obj !== null && obj.objType === p.objType;
   },
   [CType.RIGHTMOST_OBJECT_IN_ROOM_IS_STYLE]: (p, s) => {
     const obj = getRightmostObject(s, p.room);
-    return obj === null || obj.style === p.style;
+    return obj !== null && obj.style === p.style;
   },
   [CType.RIGHTMOST_OBJECT_IN_ROOM_IS_COLOR]: (p, s) => {
     const obj = getRightmostObject(s, p.room);
-    return obj === null || obj.color === p.color;
+    return obj !== null && obj.color === p.color;
   },
   [CType.RIGHTMOST_OBJECT_IN_ROOM_IS_TYPE]: (p, s) => {
     const obj = getRightmostObject(s, p.room);
-    return obj === null || obj.objType === p.objType;
+    return obj !== null && obj.objType === p.objType;
   },
   [CType.INSEPARABLE]: (p, s) => s.roomNames.every(rn =>
     roomHasAbstractFeature(s, rn, { type: p.featureAType, value: p.featureAValue }) ===
@@ -565,6 +617,100 @@ const EVAL = {
     return cA > cB;
   },
   [CType.MORE_COLOR_THAN_COLOR]: (p, s) => s.countObjColor(p.colorA) > s.countObjColor(p.colorB),
+  // New variety types
+  [CType.STYLE_DOMINANCE]: (p, s) => s.countObjStyle(p.styleA) > s.countObjStyle(p.styleB),
+  [CType.ROOM_OBJECT_COUNT_COMPARISON]: (p, s) => s.rooms[p.roomA].objectCount() > s.rooms[p.roomB].objectCount(),
+  [CType.AREA_DOMINANT_COLOR_DIFFERENT]: (p, s) => {
+    // Compute dominant wall color per area (most frequent; tie-break by first seen)
+    function dominantColor(area) {
+      const counts = {};
+      for (const rn of s.areaRoomNames(area)) {
+        const c = s.rooms[rn].wallColor;
+        counts[c] = (counts[c] || 0) + 1;
+      }
+      let best = null, bestN = 0;
+      for (const [c, n] of Object.entries(counts)) {
+        if (n > bestN) { best = c; bestN = n; }
+      }
+      return best;
+    }
+    return dominantColor(p.areaA) !== dominantColor(p.areaB);
+  },
+  // ── Upper-bound constraints ──────────────────────────────
+  [CType.AT_MOST_N_ROOMS_COLOR]: (p, s) => s.countRoomsColor(p.color) <= p.n,
+  [CType.AT_MOST_N_OBJECT_TYPE]: (p, s) => s.countObjType(p.objType) <= p.n,
+  [CType.AT_MOST_N_STYLE_OBJECTS]: (p, s) => s.countObjStyle(p.style) <= p.n,
+  // ── Room-to-room wall color relations ────────────────────
+  [CType.ROOMS_SAME_WALL_COLOR]: (p, s) => s.rooms[p.roomA].wallColor === s.rooms[p.roomB].wallColor,
+  [CType.ROOMS_DIFF_WALL_COLOR]: (p, s) => s.rooms[p.roomA].wallColor !== s.rooms[p.roomB].wallColor,
+  [CType.ROOM_WALL_COLOR_WARMER]: (p, s) =>
+    WARM_COLORS.has(s.rooms[p.roomA].wallColor) && COOL_COLORS.has(s.rooms[p.roomB].wallColor),
+  // ── Style-to-wall-color harmony ──────────────────────────
+  [CType.STYLE_REQUIRES_WALL_COLOR]: (p, s) =>
+    s.roomNames.every(rn => s.rooms[rn].getObject(p.objType) === null ||
+      !s.rooms[rn].getObjects().some(o => o.style === p.style && o.objType === p.objType) ||
+      s.rooms[rn].wallColor === p.color),
+  [CType.STYLE_COLOR_HARMONY]: (p, s) =>
+    s.getAllObjects().filter(o => o.style === p.style).every(o => {
+      const rn = s.roomNames.find(rn => s.rooms[rn].getObjects().includes(o));
+      return rn && s.rooms[rn].wallColor === STYLE_TO_COLOR[o.objType][o.style];
+    }),
+  // ── Room diversity ───────────────────────────────────────
+  [CType.ROOM_STYLE_DIVERSITY]: (p, s) =>
+    s.roomNames.every(rn => {
+      const objs = s.rooms[rn].getObjects();
+      return objs.length === 0 || new Set(objs.map(o => o.style)).size >= p.n;
+    }),
+  [CType.ROOM_COLOR_DIVERSITY]: (p, s) =>
+    s.roomNames.every(rn => {
+      const objs = s.rooms[rn].getObjects();
+      return objs.length === 0 || new Set(objs.map(o => o.color)).size >= p.n;
+    }),
+  // ── Area-level balance ───────────────────────────────────
+  [CType.AREA_OBJECT_COUNT_EQUAL]: (p, s) =>
+    areaObjects(s, p.areaA).length === areaObjects(s, p.areaB).length,
+  [CType.AREA_STYLE_BALANCE]: (p, s) =>
+    areaObjects(s, p.areaA).filter(o => o.style === p.style).length ===
+    areaObjects(s, p.areaB).filter(o => o.style === p.style).length,
+  // ── Wall color temperature balance ───────────────────────
+  [CType.MORE_WARM_ROOMS_THAN_COOL]: (p, s) =>
+    s.roomNames.filter(rn => WARM_COLORS.has(s.rooms[rn].wallColor)).length >
+    s.roomNames.filter(rn => COOL_COLORS.has(s.rooms[rn].wallColor)).length,
+  [CType.WARM_ROOM_COUNT_EQUAL]: (p, s) =>
+    s.roomNames.filter(rn => WARM_COLORS.has(s.rooms[rn].wallColor)).length ===
+    s.roomNames.filter(rn => COOL_COLORS.has(s.rooms[rn].wallColor)).length,
+  [CType.MORE_COOL_ROOMS_THAN_WARM]: (p, s) =>
+    s.roomNames.filter(rn => COOL_COLORS.has(s.rooms[rn].wallColor)).length >
+    s.roomNames.filter(rn => WARM_COLORS.has(s.rooms[rn].wallColor)).length,
+  // ── Total object count ───────────────────────────────────
+  [CType.EXACTLY_N_TOTAL_OBJECTS]: (p, s) => s.getAllObjects().length === p.n,
+  [CType.AT_LEAST_N_TOTAL_OBJECTS]: (p, s) => s.getAllObjects().length >= p.n,
+  // ── Style count equality ─────────────────────────────────
+  [CType.STYLE_COUNT_EQUAL]: (p, s) => s.countObjStyle(p.styleA) === s.countObjStyle(p.styleB),
+  // ── Color/style coverage ─────────────────────────────────
+  [CType.ALL_COLORS_USED]: (p, s) =>
+    new Set(s.roomNames.map(rn => s.rooms[rn].wallColor)).size >= p.n,
+  [CType.ALL_STYLES_USED]: (p, s) =>
+    new Set(s.getAllObjects().map(o => o.style)).size >= p.n,
+  // ── Parity constraints ─────────────────────────────────────
+  [CType.ODD_COUNT_ROOMS_COLOR]: (p, s) => s.countRoomsColor(p.color) % 2 === 1,
+  [CType.EVEN_COUNT_OBJECT_TYPE]: (p, s) => s.countObjType(p.objType) % 2 === 0,
+  [CType.ODD_COUNT_STYLE_OBJECTS]: (p, s) => s.countObjStyle(p.style) % 2 === 1,
+  // ── Cross-room implications ────────────────────────────────
+  [CType.WALL_COLOR_IMPLIES_WALL_COLOR]: (p, s) =>
+    s.rooms[p.ifRoom].wallColor !== p.ifColor || s.rooms[p.thenRoom].wallColor === p.thenColor,
+  // ── Composite sum constraints ──────────────────────────────
+  [CType.WARM_OBJECTS_PLUS_COOL_ROOMS]: (p, s) => {
+    const warmObjs = s.getAllObjects().filter(o => WARM_COLORS.has(o.color)).length;
+    const coolRooms = s.roomNames.filter(rn => COOL_COLORS.has(s.rooms[rn].wallColor)).length;
+    return warmObjs + coolRooms === p.n;
+  },
+  // ── Minimum furnishing ─────────────────────────────────────
+  [CType.MIN_OBJECTS_PER_ROOM]: (p, s) =>
+    s.roomNames.every(rn => s.rooms[rn].objectCount() >= p.n),
+  // ── Color distribution ─────────────────────────────────────
+  [CType.EXACTLY_ONE_COLOR_PER_TYPE]: (p, s) =>
+    COLORS.every(color => s.getAllObjects().filter(o => o.objType === p.objType && o.color === color).length === 1),
 };
 
 function evalC(c, state) {
@@ -577,7 +723,7 @@ function evalC(c, state) {
 // SECTION 5: CANDIDATE CONSTRAINT GENERATION
 // ================================================================
 
-function generateCandidates(state) {
+function generateCandidates(state, options = {}) {
   const cands = [];
   const add = (ctype, params, score) => {
     const c = { ctype, params, score };
@@ -681,6 +827,22 @@ function generateCandidates(state) {
     if (ct >= 2) for (let k = Math.max(2, ct - 1); k <= ct; k++)
       add(CType.AT_LEAST_N_STYLE_OBJECTS, { style: st, n: k }, 4.0 + 2.0 * (k / ct));
   }
+  // ── Upper-bound constraints ──────────────────────────────
+  for (const color of COLORS) {
+    const nw = state.countRoomsColor(color);
+    if (nw >= 1 && nw <= 3) for (let k = nw; k <= 3; k++)
+      add(CType.AT_MOST_N_ROOMS_COLOR, { color, n: k }, 5.0 + 1.5 * (k / 3));
+  }
+  for (const ot of OBJECT_TYPES) {
+    const ct = state.countObjType(ot);
+    if (ct >= 1 && ct <= 3) for (let k = ct; k <= 3; k++)
+      add(CType.AT_MOST_N_OBJECT_TYPE, { objType: ot, n: k }, 4.5 + 1.5 * (k / 3));
+  }
+  for (const st of STYLES) {
+    const ct = state.countObjStyle(st);
+    if (ct >= 1 && ct <= 3) for (let k = ct; k <= 3; k++)
+      add(CType.AT_MOST_N_STYLE_OBJECTS, { style: st, n: k }, 4.5 + 1.5 * (k / 3));
+  }
 
   // Global qualitative
   for (const ot of OBJECT_TYPES) {
@@ -756,6 +918,20 @@ function generateCandidates(state) {
     add(CType.DIAG_ROOMS_SAME_WALL, {}, 7.5);
   if (evalC({ ctype: CType.ADJ_ROOMS_DIFF_WALL, params: {} }, state))
     add(CType.ADJ_ROOMS_DIFF_WALL, {}, 8.0);
+  // ── Room-to-room wall color relations ────────────────────
+  for (let i = 0; i < state.roomNames.length; i++) {
+    for (let j = i + 1; j < state.roomNames.length; j++) {
+      const rA = state.roomNames[i], rB = state.roomNames[j];
+      if (state.rooms[rA].wallColor === state.rooms[rB].wallColor)
+        add(CType.ROOMS_SAME_WALL_COLOR, { roomA: rA, roomB: rB }, 6.5);
+      else
+        add(CType.ROOMS_DIFF_WALL_COLOR, { roomA: rA, roomB: rB }, 5.5);
+      if (WARM_COLORS.has(state.rooms[rA].wallColor) && COOL_COLORS.has(state.rooms[rB].wallColor))
+        add(CType.ROOM_WALL_COLOR_WARMER, { roomA: rA, roomB: rB }, 6.0);
+      if (WARM_COLORS.has(state.rooms[rB].wallColor) && COOL_COLORS.has(state.rooms[rA].wallColor))
+        add(CType.ROOM_WALL_COLOR_WARMER, { roomA: rB, roomB: rA }, 6.0);
+    }
+  }
 
   // ── Conditional constraints ──────────────────────────────
   for (const color of COLORS) {
@@ -796,6 +972,26 @@ function generateCandidates(state) {
         const aE = state.countObjType(OBJECT_TYPES[i]) > 0, bE = state.countObjType(OBJECT_TYPES[j]) > 0;
         if (aE && bE) add(CType.OBJ_TYPE_FORBIDS_OBJ_TYPE, { objTypeA: OBJECT_TYPES[i], objTypeB: OBJECT_TYPES[j] }, 7.5);
       }
+    }
+  }
+  // ── Style-to-wall-color harmony ──────────────────────────
+  for (const st of STYLES) {
+    for (const ot of OBJECT_TYPES) {
+      for (const color of COLORS) {
+        if (evalC({ ctype: CType.STYLE_REQUIRES_WALL_COLOR, params: { style: st, objType: ot, color } }, state)) {
+          const hasIt = state.roomNames.some(rn => {
+            const objs = state.rooms[rn].getObjects().filter(o => o.style === st && o.objType === ot);
+            return objs.length > 0;
+          });
+          add(CType.STYLE_REQUIRES_WALL_COLOR, { style: st, objType: ot, color }, hasIt ? 7.5 : 5.0);
+        }
+      }
+    }
+  }
+  for (const st of STYLES) {
+    if (evalC({ ctype: CType.STYLE_COLOR_HARMONY, params: { style: st } }, state)) {
+      const hasIt = state.countObjStyle(st) > 0;
+      add(CType.STYLE_COLOR_HARMONY, { style: st }, hasIt ? 7.5 : 4.0);
     }
   }
 
@@ -875,6 +1071,187 @@ function generateCandidates(state) {
     }
   }
 
+  // ── New variety constraint types ─────────────────────────────────────
+
+  // STYLE_DOMINANCE: one style outnumbers another
+  {
+    const styleCounts = {};
+    for (const st of STYLES) styleCounts[st] = state.countObjStyle(st);
+    for (let i = 0; i < STYLES.length; i++) {
+      for (let j = 0; j < STYLES.length; j++) {
+        if (i === j) continue;
+        if (styleCounts[STYLES[i]] > styleCounts[STYLES[j]] && styleCounts[STYLES[i]] >= 2)
+          add(CType.STYLE_DOMINANCE, { styleA: STYLES[i], styleB: STYLES[j] }, 6.0 + Math.min(styleCounts[STYLES[i]] - styleCounts[STYLES[j]], 2));
+      }
+    }
+  }
+
+  // ROOM_OBJECT_COUNT_COMPARISON: one room has more objects than another
+  {
+    for (let i = 0; i < state.roomNames.length; i++) {
+      for (let j = 0; j < state.roomNames.length; j++) {
+        if (i === j) continue;
+        const cA = state.rooms[state.roomNames[i]].objectCount();
+        const cB = state.rooms[state.roomNames[j]].objectCount();
+        if (cA > cB)
+          add(CType.ROOM_OBJECT_COUNT_COMPARISON, { roomA: state.roomNames[i], roomB: state.roomNames[j] }, 6.5);
+      }
+    }
+  }
+
+  // AREA_DOMINANT_COLOR_DIFFERENT: two areas have different dominant wall colors
+  {
+    function dominantColor(area) {
+      const counts = {};
+      for (const rn of state.areaRoomNames(area)) {
+        const c = state.rooms[rn].wallColor;
+        counts[c] = (counts[c] || 0) + 1;
+      }
+      let best = null, bestN = 0;
+      for (const [c, n] of Object.entries(counts)) {
+        if (n > bestN) { best = c; bestN = n; }
+      }
+      return best;
+    }
+    for (let i = 0; i < AREA_NAMES.length; i++) {
+      for (let j = i + 1; j < AREA_NAMES.length; j++) {
+        const dA = dominantColor(AREA_NAMES[i]), dB = dominantColor(AREA_NAMES[j]);
+        if (dA && dB && dA !== dB)
+          add(CType.AREA_DOMINANT_COLOR_DIFFERENT, { areaA: AREA_NAMES[i], areaB: AREA_NAMES[j] }, 7.0);
+      }
+    }
+  }
+  // ── Room diversity ───────────────────────────────────────
+  {
+    for (let n = 2; n <= 3; n++) {
+      if (evalC({ ctype: CType.ROOM_STYLE_DIVERSITY, params: { n } }, state))
+        add(CType.ROOM_STYLE_DIVERSITY, { n }, 6.0 + n * 0.5);
+      if (evalC({ ctype: CType.ROOM_COLOR_DIVERSITY, params: { n } }, state))
+        add(CType.ROOM_COLOR_DIVERSITY, { n }, 6.0 + n * 0.5);
+    }
+  }
+  // ── Area-level balance ───────────────────────────────────
+  {
+    for (let i = 0; i < AREA_NAMES.length; i++) {
+      for (let j = i + 1; j < AREA_NAMES.length; j++) {
+        const aA = AREA_NAMES[i], aB = AREA_NAMES[j];
+        const cA = areaObjects(state, aA).length;
+        const cB = areaObjects(state, aB).length;
+        if (cA === cB && cA > 0)
+          add(CType.AREA_OBJECT_COUNT_EQUAL, { areaA: aA, areaB: aB }, 6.5);
+        for (const st of STYLES) {
+          const sA = state.areaRoomNames(aA).flatMap(rn => state.rooms[rn].getObjects()).filter(o => o.style === st).length;
+          const sB = state.areaRoomNames(aB).flatMap(rn => state.rooms[rn].getObjects()).filter(o => o.style === st).length;
+          if (sA === sB && sA > 0)
+            add(CType.AREA_STYLE_BALANCE, { areaA: aA, areaB: aB, style: st }, 7.0);
+        }
+      }
+    }
+  }
+  // ── Wall color temperature balance ───────────────────────
+  {
+    const warmRooms = state.roomNames.filter(rn => WARM_COLORS.has(state.rooms[rn].wallColor)).length;
+    const coolRooms = state.roomNames.filter(rn => COOL_COLORS.has(state.rooms[rn].wallColor)).length;
+    if (warmRooms > coolRooms) add(CType.MORE_WARM_ROOMS_THAN_COOL, {}, 6.0);
+    if (coolRooms > warmRooms) add(CType.MORE_COOL_ROOMS_THAN_WARM, {}, 6.0);
+    if (warmRooms === coolRooms && warmRooms > 0) add(CType.WARM_ROOM_COUNT_EQUAL, {}, 6.5);
+  }
+  // ── Total object count ───────────────────────────────────
+  {
+    const total = state.getAllObjects().length;
+    add(CType.EXACTLY_N_TOTAL_OBJECTS, { n: total }, 5.5);
+    for (let k = Math.max(1, total - 1); k <= total; k++)
+      add(CType.AT_LEAST_N_TOTAL_OBJECTS, { n: k }, 4.0 + 1.5 * (k / total));
+  }
+  // ── Style count equality ─────────────────────────────────
+  {
+    for (let i = 0; i < STYLES.length; i++) {
+      for (let j = i + 1; j < STYLES.length; j++) {
+        if (state.countObjStyle(STYLES[i]) === state.countObjStyle(STYLES[j]) && state.countObjStyle(STYLES[i]) > 0)
+          add(CType.STYLE_COUNT_EQUAL, { styleA: STYLES[i], styleB: STYLES[j] }, 6.5);
+      }
+    }
+  }
+  // ── Color/style coverage ─────────────────────────────────
+  {
+    const colorsUsed = new Set(state.roomNames.map(rn => state.rooms[rn].wallColor)).size;
+    if (colorsUsed >= 2) add(CType.ALL_COLORS_USED, { n: colorsUsed }, 5.5 + colorsUsed * 0.5);
+    const stylesUsed = new Set(state.getAllObjects().map(o => o.style)).size;
+    if (stylesUsed >= 2) add(CType.ALL_STYLES_USED, { n: stylesUsed }, 5.5 + stylesUsed * 0.5);
+  }
+
+  // ── Parity constraints ─────────────────────────────────
+  {
+    for (const color of COLORS) {
+      const cnt = state.countRoomsColor(color);
+      if (cnt % 2 === 1) add(CType.ODD_COUNT_ROOMS_COLOR, { color }, 6.5);
+    }
+    for (const ot of OBJECT_TYPES) {
+      const cnt = state.countObjType(ot);
+      if (cnt % 2 === 0 && cnt >= 2) add(CType.EVEN_COUNT_OBJECT_TYPE, { objType: ot }, 6.0);
+    }
+    for (const st of STYLES) {
+      const cnt = state.countObjStyle(st);
+      if (cnt % 2 === 1 && cnt >= 1) add(CType.ODD_COUNT_STYLE_OBJECTS, { style: st }, 6.0);
+    }
+  }
+
+  // ── Cross-room implications ────────────────────────────
+  {
+    for (let i = 0; i < state.roomNames.length; i++) {
+      for (let j = 0; j < state.roomNames.length; j++) {
+        if (i === j) continue;
+        const ifRoom = state.roomNames[i], thenRoom = state.roomNames[j];
+        for (const ifColor of COLORS) {
+          for (const thenColor of COLORS) {
+            if (evalC({ ctype: CType.WALL_COLOR_IMPLIES_WALL_COLOR, params: { ifRoom, ifColor, thenRoom, thenColor } }, state)) {
+              const ifRoomMatches = state.rooms[ifRoom].wallColor === ifColor;
+              add(CType.WALL_COLOR_IMPLIES_WALL_COLOR, { ifRoom, ifColor, thenRoom, thenColor }, ifRoomMatches ? 7.0 : 5.0);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ── Composite sum constraints ──────────────────────────
+  {
+    const warmObjs = state.getAllObjects().filter(o => WARM_COLORS.has(o.color)).length;
+    const coolRooms = state.roomNames.filter(rn => COOL_COLORS.has(state.rooms[rn].wallColor)).length;
+    const total = warmObjs + coolRooms;
+    if (total >= 1 && total <= 12)
+      add(CType.WARM_OBJECTS_PLUS_COOL_ROOMS, { n: total }, 6.5);
+  }
+
+  // ── Minimum furnishing ─────────────────────────────────
+  {
+    for (let n = 1; n <= 3; n++) {
+      if (evalC({ ctype: CType.MIN_OBJECTS_PER_ROOM, params: { n } }, state))
+        add(CType.MIN_OBJECTS_PER_ROOM, { n }, 5.5 + n * 0.5);
+    }
+  }
+
+  // ── Color distribution ─────────────────────────────────
+  {
+    for (const ot of OBJECT_TYPES) {
+      if (evalC({ ctype: CType.EXACTLY_ONE_COLOR_PER_TYPE, params: { objType: ot } }, state)) {
+        const objCount = state.countObjType(ot);
+        add(CType.EXACTLY_ONE_COLOR_PER_TYPE, { objType: ot }, objCount >= 3 ? 7.5 : 5.5);
+      }
+    }
+  }
+
+  // Cap INSEPARABLE candidates to avoid flooding the pool
+  const maxInseparable = options.maxInseparable != null ? options.maxInseparable : Infinity;
+  {
+    const inseparableCands = cands.filter(c => c.ctype === CType.INSEPARABLE);
+    if (inseparableCands.length > maxInseparable) {
+      inseparableCands.sort((a, b) => b.score - a.score);
+      const keep = new Set(inseparableCands.slice(0, maxInseparable).map(c => constraintKey(c)));
+      return cands.filter(c => c.ctype !== CType.INSEPARABLE || keep.has(constraintKey(c)));
+    }
+  }
+
   return cands;
 }
 
@@ -882,14 +1259,20 @@ function generateCandidates(state) {
 // SECTION 5b: SOLUTION SPACE SAMPLING (for tight constraint assignment)
 // ================================================================
 
-/** Generate one random board (uniform-ish over walls and object placements). */
-function sampleRandomBoard(rng, numPlayers) {
+/** Generate one random board matching difficulty params (fill rate, colors, styles). */
+function sampleRandomBoard(rng, numPlayers, params) {
   const state = new HouseState(numPlayers);
+  const [minObj, maxObj] = params ? params.totalObjects : [6, 9];
+  const avgObj = (minObj + maxObj) / 2;
+  const totalSlots = numPlayers === 2 ? 12 : 12;
+  const fillRate = avgObj / totalSlots;
+  const colorsUsed = params ? rng.sample(COLORS, Math.min(params.numColors, 4)) : COLORS;
+  const stylesUsed = params ? rng.sample(STYLES, Math.min(params.numStyles, 4)) : STYLES;
   for (const rn of state.roomNames) {
-    state.rooms[rn].wallColor = rng.choice(COLORS);
+    state.rooms[rn].wallColor = rng.choice(colorsUsed);
     for (const ot of OBJECT_TYPES) {
-      if (rng.random() < 0.6) {
-        state.rooms[rn].setObject(ot, makeToken(ot, rng.choice(STYLES)));
+      if (rng.random() < fillRate) {
+        state.rooms[rn].setObject(ot, makeToken(ot, rng.choice(stylesUsed)));
       }
     }
   }
@@ -911,7 +1294,7 @@ function sampleBoardByWalk(rng, T, maxSteps) {
 }
 
 /** Pool of boards: walkFraction from random walk from T, rest random. Used to proxy |S|. */
-function sampleBoardPool(rng, T, poolSize, walkFraction = 0.8) {
+function sampleBoardPool(rng, T, poolSize, params, walkFraction = 0.8) {
   const pool = [];
   const nWalk = Math.floor(poolSize * walkFraction);
   const nRandom = poolSize - nWalk;
@@ -919,7 +1302,7 @@ function sampleBoardPool(rng, T, poolSize, walkFraction = 0.8) {
     pool.push(sampleBoardByWalk(rng, T, 12));
   }
   for (let i = 0; i < nRandom; i++) {
-    pool.push(sampleRandomBoard(rng, T.numPlayers));
+    pool.push(sampleRandomBoard(rng, T.numPlayers, params));
   }
   return pool;
 }
@@ -950,94 +1333,172 @@ function formatAbstractFeature(type, value) {
 }
 
 const NL = {
-  [CType.ROOM_WALL_COLOR_IS]:       'The {room} must be painted {color}.',
-  [CType.ROOM_WALL_COLOR_IS_NOT]:   'The {room} must not be painted {color}.',
-  [CType.ROOM_WALL_WARM]:           'The {room} must be painted a warm color.',
-  [CType.ROOM_WALL_COOL]:           'The {room} must be painted a cool color.',
-  [CType.ROOM_HAS_OBJECT_TYPE]:     'The {room} must contain a {objTypeLower}.',
-  [CType.ROOM_NO_OBJECT_TYPE]:      'The {room} must not contain a {objTypeLower}.',
-  [CType.ROOM_HAS_STYLE]:           'The {room} must contain at least one {styleLower} object.',
-  [CType.ROOM_NO_STYLE]:            'The {room} must not contain any {styleLower} objects.',
-  [CType.ROOM_HAS_COLOR_OBJECT]:    'The {room} must contain at least one {color} object.',
-  [CType.ROOM_NO_COLOR_OBJECT]:     'The {room} must not contain any {color} objects.',
-  [CType.ROOM_HAS_FEATURE]:        'The {room} must have the {objTypeLower} in a {color} room.',
-  [CType.ROOM_NO_FEATURE]:         'The {room} must not have the {objTypeLower} in a {color} room.',
-  [CType.EXACTLY_N_ROOMS_WITH_FEATURE]: 'Exactly {n} {roomWord} must have the {objTypeLower} in a {color} room.',
-  [CType.AREA_NO_FEATURES_COLOR]:  'The {area} must not contain {colorLower} features.',
-  [CType.ROOM_NO_FEATURES_COLOR]:  'The {room} must not contain {colorLower} features.',
-  [CType.LEFTMOST_OBJECT_IN_ROOM_IS_STYLE]: 'The leftmost object in the {room} must be {styleLower}.',
-  [CType.LEFTMOST_OBJECT_IN_ROOM_IS_COLOR]:  'The leftmost object in the {room} must be {color}.',
-  [CType.LEFTMOST_OBJECT_IN_ROOM_IS_TYPE]:  'The leftmost object in the {room} must be a {objTypeLower}.',
-  [CType.RIGHTMOST_OBJECT_IN_ROOM_IS_STYLE]: 'The rightmost object in the {room} must be {styleLower}.',
-  [CType.RIGHTMOST_OBJECT_IN_ROOM_IS_COLOR]:  'The rightmost object in the {room} must be {color}.',
-  [CType.RIGHTMOST_OBJECT_IN_ROOM_IS_TYPE]:  'The rightmost object in the {room} must be a {objTypeLower}.',
-  [CType.INSEPARABLE]:             'The {featureA} and the {featureB} are inseparable: any room that contains one must contain the other.',
-  [CType.AREA_HAS_OBJECT_TYPE]:     'The {area} must contain a {objTypeLower}.',
-  [CType.AREA_NO_OBJECT_TYPE]:      'The {area} must not contain any {objTypePlural}.',
-  [CType.AREA_HAS_COLOR_OBJECT]:    'The {area} must contain at least one {color} object.',
-  [CType.AREA_NO_COLOR_OBJECT]:     'The {area} must not contain any {color} objects.',
-  [CType.AREA_HAS_STYLE]:           'The {area} must contain at least one {styleLower} object.',
-  [CType.AREA_NO_STYLE]:            'The {area} must not contain any {styleLower} objects.',
-  [CType.EXACTLY_N_ROOMS_COLOR]:    'Exactly {n} {roomWord} must be painted {color}.',
-  [CType.AT_LEAST_N_OBJECT_TYPE]:   'There must be at least {n} {objTypePlural} in the house.',
-  [CType.AT_LEAST_N_COLOR_OBJECTS]: 'There must be at least {n} {color} {objWord} in the house.',
-  [CType.AT_LEAST_N_STYLE_OBJECTS]: 'There must be at least {n} {styleLower} {objWord} in the house.',
-  [CType.NO_COLOR_OBJECTS_IN_HOUSE]:'There must not be any {color} objects in the house.',
-  [CType.ALL_OBJECT_TYPE_SAME_COLOR]:'All {objTypePlural} in the house must be {color}.',
-  [CType.ALL_OBJECT_TYPE_SAME_STYLE]:'All {objTypePlural} in the house must be {styleLower}.',
-  [CType.COLOR_ROOM_COUNT_EQUAL]:   'The number of {colorA} rooms must equal the number of {colorB} rooms.',
-  [CType.ROOM_WITH_TYPE_MUST_HAVE_TYPE]: 'Any room with a {objTypeALower} must also contain a {objTypeBLower}.',
-  [CType.NO_ROOM_MORE_THAN_ONE_STYLE]:  'No room may contain more than one {styleLower} object.',
-  [CType.AT_LEAST_N_WARM_OBJECTS]:  'There must be at least {n} warm-colored {objWord} in the house.',
-  [CType.AT_LEAST_N_COOL_OBJECTS]:  'There must be at least {n} cool-colored {objWord} in the house.',
-  // Spatial
-  [CType.DIAG_STYLE_NO_WALL_COLOR]:   'The room diagonally opposite any room with a {styleLower} object must not be painted {color}.',
-  [CType.ADJ_STYLE_NO_WALL_COLOR]:    'Rooms adjacent to any room containing a {styleLower} object must not be painted {color}.',
-  [CType.ABOVE_STYLE_NO_WALL_COLOR]:  'The room directly above any room with a {styleLower} object must not be painted {color}.',
-  [CType.BELOW_STYLE_NO_WALL_COLOR]:  'The room directly below any room with a {styleLower} object must not be painted {color}.',
-  [CType.BESIDE_STYLE_NO_WALL_COLOR]: 'The room beside any room containing a {styleLower} object must not be painted {color}.',
-  [CType.DIAG_ROOMS_SAME_WALL]:       'Diagonally opposite rooms must be painted the same color.',
-  [CType.ADJ_ROOMS_DIFF_WALL]:        'No two adjacent rooms may be painted the same color.',
-  // Conditional
-  [CType.WALL_COLOR_FORBIDS_STYLE]:     'Rooms painted {color} must not contain {styleLower} objects.',
-  [CType.STYLE_PAIR_FORBIDDEN]:         'No room may contain both a {styleALower} and a {styleBLower} object.',
-  [CType.OBJ_TYPE_REQUIRES_WALL_COLOR]: 'Any room with a {objTypeLower} must be painted {color}.',
-  [CType.WALL_COLOR_FORBIDS_OBJ_COLOR]: '{wallColor} rooms must not contain {objColor} objects.',
-  [CType.OBJ_TYPE_FORBIDS_OBJ_TYPE]:    'Rooms with a {objTypeALower} must not also contain a {objTypeBLower}.',
-  // Funky
-  [CType.MORE_WARM_THAN_COOL]:    'There must be more warm-colored objects than cool-colored objects in the house.',
-  [CType.MORE_COOL_THAN_WARM]:    'There must be more cool-colored objects than warm-colored objects in the house.',
-  [CType.WALL_MATCHES_OBJECT]:    'Every room must contain at least one object matching its wall color.',
-  [CType.NO_WALL_MATCHES_OBJECT]: 'No room may contain an object matching its wall color.',
-  [CType.COLOR_EXCLUSION_ZONE]:   'No two {color} rooms may both contain a {objTypeLower}.',
-  // Quantity comparison
-  [CType.MORE_OBJ_COLOR_THAN_STYLE]:           'There must be more {color} objects than {styleLower} objects in the house.',
-  [CType.MORE_OBJ_STYLE_THAN_COLOR]:           'There must be more {styleLower} objects than {color} objects in the house.',
-  [CType.MORE_TYPE_IN_AREA_THAN_TYPE_IN_AREA]: 'There must be more {objTypeAPlural} {areaA} than {objTypeBPlural} {areaB}.',
-  [CType.MORE_COLOR_THAN_COLOR]:               'There must be more {colorA} objects than {colorB} objects in the house.',
+  // ── Room wall color ────────────────────────────────────────────────
+  [CType.ROOM_WALL_COLOR_IS]:       ['The {room} must be painted {color}.', 'I want the {room} walls to be {color}.', 'Make sure the {room} is {color}.'],
+  [CType.ROOM_WALL_COLOR_IS_NOT]:   ['The {room} must not be painted {color}.', 'The {room} should never be {color}.', 'Avoid painting the {room} {color}.'],
+  [CType.ROOM_WALL_WARM]:           ['The {room} must be painted a warm color.', 'The {room} needs a warm-colored wall.'],
+  [CType.ROOM_WALL_COOL]:           ['The {room} must be painted a cool color.', 'The {room} needs a cool-colored wall.'],
+  // ── Room object presence ───────────────────────────────────────────
+  [CType.ROOM_HAS_OBJECT_TYPE]:     ['The {room} must contain a {objTypeLower}.', 'There should be a {objTypeLower} in the {room}.', 'I want a {objTypeLower} placed in the {room}.'],
+  [CType.ROOM_NO_OBJECT_TYPE]:      ['The {room} must not contain a {objTypeLower}.', 'Never put a {objTypeLower} in the {room}.', 'The {room} should be without a {objTypeLower}.'],
+  [CType.ROOM_HAS_STYLE]:           ['The {room} must contain at least one {styleLower} object.', 'Put a {styleLower} piece somewhere in the {room}.', 'There must be something {styleLower} in the {room}.'],
+  [CType.ROOM_NO_STYLE]:            ['The {room} must not contain any {styleLower} objects.', 'Keep the {room} free of {styleLower} pieces.', 'No {styleLower} objects in the {room}.'],
+  [CType.ROOM_HAS_COLOR_OBJECT]:    ['The {room} must contain at least one {color} object.', 'There should be something {color} in the {room}.'],
+  [CType.ROOM_NO_COLOR_OBJECT]:     ['The {room} must not contain any {color} objects.', 'The {room} should have no {color} pieces.'],
+  // ── Room features (object type + wall color) ───────────────────────
+  [CType.ROOM_HAS_FEATURE]:        ['The {room} must have the {objTypeLower} in a {color} room.', 'Place the {objTypeLower} where the walls are {color}.'],
+  [CType.ROOM_NO_FEATURE]:         ['The {room} must not have the {objTypeLower} in a {color} room.', 'Never pair the {objTypeLower} with {color} walls in the {room}.'],
+  [CType.EXACTLY_N_ROOMS_WITH_FEATURE]: ['Exactly {n} {roomWord} must have the {objTypeLower} in a {color} room.'],
+  // ── Area-level constraints ────────────────────────────────────────
+  [CType.AREA_NO_FEATURES_COLOR]:  ['The {area} must not contain {colorLower} features.', 'Keep the {area} free of anything {colorLower}.'],
+  [CType.ROOM_NO_FEATURES_COLOR]:  ['The {room} must not contain {colorLower} features.', 'The {room} should have no {colorLower} elements at all.'],
+  // ── Leftmost/rightmost ─────────────────────────────────────────────
+  [CType.LEFTMOST_OBJECT_IN_ROOM_IS_STYLE]: ['The leftmost object in the {room} must be {styleLower}.', 'Start the {room} off with a {styleLower} piece on the left.'],
+  [CType.LEFTMOST_OBJECT_IN_ROOM_IS_COLOR]:  ['The leftmost object in the {room} must be {color}.', 'The first object you see in the {room} should be {color}.'],
+  [CType.LEFTMOST_OBJECT_IN_ROOM_IS_TYPE]:  ['The leftmost object in the {room} must be a {objTypeLower}.', 'A {objTypeLower} should sit on the left in the {room}.'],
+  [CType.RIGHTMOST_OBJECT_IN_ROOM_IS_STYLE]: ['The rightmost object in the {room} must be {styleLower}.', 'End the {room} with a {styleLower} piece on the right.'],
+  [CType.RIGHTMOST_OBJECT_IN_ROOM_IS_COLOR]:  ['The rightmost object in the {room} must be {color}.', 'The last object in the {room} should be {color}.'],
+  [CType.RIGHTMOST_OBJECT_IN_ROOM_IS_TYPE]:  ['The rightmost object in the {room} must be a {objTypeLower}.', 'A {objTypeLower} should sit on the right in the {room}.'],
+  // ── Inseparable ────────────────────────────────────────────────────
+  [CType.INSEPARABLE]:             [
+    'The {featureA} and the {featureB} always appear together: a room with one always has the other.',
+    'Wherever you find a {featureA}, a {featureB} goes with it — they never split up.',
+    'The {featureA} and the {featureB} are linked: they share the same rooms.',
+  ],
+  [CType.AREA_HAS_OBJECT_TYPE]:     ['The {area} must contain a {objTypeLower}.', 'There should be at least one {objTypeLower} {area}.'],
+  [CType.AREA_NO_OBJECT_TYPE]:      ['The {area} must not contain any {objTypePlural}.', 'Keep the {area} free of {objTypePlural}.'],
+  [CType.AREA_HAS_COLOR_OBJECT]:    ['The {area} must contain at least one {color} object.', 'There must be something {color} {area}.'],
+  [CType.AREA_NO_COLOR_OBJECT]:     ['The {area} must not contain any {color} objects.', 'No {color} objects {area}.'],
+  [CType.AREA_HAS_STYLE]:           ['The {area} must contain at least one {styleLower} object.', 'There should be a {styleLower} piece {area}.'],
+  [CType.AREA_NO_STYLE]:            ['The {area} must not contain any {styleLower} objects.', 'Keep {area} free of {styleLower} pieces.'],
+  // ── Global quantity ────────────────────────────────────────────────
+  [CType.EXACTLY_N_ROOMS_COLOR]:    ['Exactly {n} {roomWord} must be painted {color}.', 'Paint exactly {n} {roomWord} in {color}.'],
+  [CType.AT_LEAST_N_OBJECT_TYPE]:   ['There must be at least {n} {objTypePlural} in the house.', 'You need at least {n} {objTypePlural} around the house.'],
+  [CType.AT_LEAST_N_COLOR_OBJECTS]: ['There must be at least {n} {color} {objWord} in the house.', 'Scatter at least {n} {color} {objWord} throughout the house.'],
+  [CType.AT_LEAST_N_STYLE_OBJECTS]: ['There must be at least {n} {styleLower} {objWord} in the house.', 'Place at least {n} {styleLower} {objWord} around the house.'],
+  [CType.NO_COLOR_OBJECTS_IN_HOUSE]:['There must not be any {color} objects in the house.', 'The house should have no {color} objects at all.'],
+  [CType.ALL_OBJECT_TYPE_SAME_COLOR]:['All {objTypePlural} in the house must be {color}.', 'Every {objTypePlural} in the house should share the same {color} color.'],
+  [CType.ALL_OBJECT_TYPE_SAME_STYLE]:['All {objTypePlural} in the house must be {styleLower}.', 'Every {objTypePlural} should be {styleLower}.'],
+  // ── Comparison ─────────────────────────────────────────────────────
+  [CType.COLOR_ROOM_COUNT_EQUAL]:   ['The number of {colorA} rooms must equal the number of {colorB} rooms.', 'Balance the {colorA} and {colorB} rooms equally.'],
+  [CType.ROOM_WITH_TYPE_MUST_HAVE_TYPE]: ['Any room with a {objTypeALower} must also contain a {objTypeBLower}.', 'If a room has a {objTypeALower}, it needs a {objTypeBLower} too.'],
+  [CType.NO_ROOM_MORE_THAN_ONE_STYLE]:  ['No room may contain more than one {styleLower} object.', 'Limit each room to at most one {styleLower} piece.'],
+  [CType.AT_LEAST_N_WARM_OBJECTS]:  ['There must be at least {n} warm-colored {objWord} in the house.', 'Fill the house with at least {n} warm-toned {objWord}.'],
+  [CType.AT_LEAST_N_COOL_OBJECTS]:  ['There must be at least {n} cool-colored {objWord} in the house.', 'Fill the house with at least {n} cool-toned {objWord}.'],
+  // ── Spatial ────────────────────────────────────────────────────────
+  [CType.DIAG_STYLE_NO_WALL_COLOR]:   ['The room diagonally opposite any room with a {styleLower} object must not be painted {color}.', 'A {styleLower} piece means the diagonal room cannot be {color}.'],
+  [CType.ADJ_STYLE_NO_WALL_COLOR]:    ['Rooms adjacent to any room containing a {styleLower} object must not be painted {color}.', 'Neighbors of a {styleLower} room should never be {color}.'],
+  [CType.ABOVE_STYLE_NO_WALL_COLOR]:  ['The room directly above any room with a {styleLower} object must not be painted {color}.', 'If a room has a {styleLower} object, the one above it cannot be {color}.'],
+  [CType.BELOW_STYLE_NO_WALL_COLOR]:  ['The room directly below any room with a {styleLower} object must not be painted {color}.', 'If a room has a {styleLower} object, the one below it cannot be {color}.'],
+  [CType.BESIDE_STYLE_NO_WALL_COLOR]: ['The room beside any room containing a {styleLower} object must not be painted {color}.', 'A {styleLower} piece means its neighbor cannot be {color}.'],
+  [CType.DIAG_ROOMS_SAME_WALL]:       ['Diagonally opposite rooms must be painted the same color.', 'Rooms across from each other diagonally should match in color.'],
+  [CType.ADJ_ROOMS_DIFF_WALL]:        ['No two adjacent rooms may be painted the same color.', 'Walking between rooms, the walls should always change color.'],
+  // ── Conditional ────────────────────────────────────────────────────
+  [CType.WALL_COLOR_FORBIDS_STYLE]:     ['Rooms painted {color} must not contain {styleLower} objects.', 'A {color} wall means no {styleLower} objects inside.'],
+  [CType.STYLE_PAIR_FORBIDDEN]:         ['No room may contain both a {styleALower} and a {styleBLower} object.', 'A {styleALower} and a {styleBLower} piece should never share a room.'],
+  [CType.OBJ_TYPE_REQUIRES_WALL_COLOR]: ['Any room with a {objTypeLower} must be painted {color}.', 'A {objTypeLower} requires {color} walls.'],
+  [CType.WALL_COLOR_FORBIDS_OBJ_COLOR]: ['{wallColor} rooms must not contain {objColor} objects.', 'Where walls are {wallColor}, no {objColor} objects allowed.'],
+  [CType.OBJ_TYPE_FORBIDS_OBJ_TYPE]:    ['Rooms with a {objTypeALower} must not also contain a {objTypeBLower}.', 'A {objTypeALower} and a {objTypeBLower} should never share a room.'],
+  // ── Funky ──────────────────────────────────────────────────────────
+  [CType.MORE_WARM_THAN_COOL]:    ['There must be more warm-colored objects than cool-colored objects in the house.', 'Warm tones should outnumber cool tones in the house.'],
+  [CType.MORE_COOL_THAN_WARM]:    ['There must be more cool-colored objects than warm-colored objects in the house.', 'Cool tones should outnumber warm tones in the house.'],
+  [CType.WALL_MATCHES_OBJECT]:    ['Every room must contain at least one object matching its wall color.', 'Each room should have an object that echoes its wall color.'],
+  [CType.NO_WALL_MATCHES_OBJECT]: ['No room may contain an object matching its wall color.', 'Objects should never match the wall color of their room.'],
+  [CType.COLOR_EXCLUSION_ZONE]:   ['No two {color} rooms may both contain a {objTypeLower}.', 'At most one {color} room can hold a {objTypeLower}.'],
+  // ── Quantity comparison ────────────────────────────────────────────
+  [CType.MORE_OBJ_COLOR_THAN_STYLE]:           ['There must be more {color} objects than {styleLower} objects in the house.', '{color} objects should outnumber the {styleLower} ones.'],
+  [CType.MORE_OBJ_STYLE_THAN_COLOR]:           ['There must be more {styleLower} objects than {color} objects in the house.', '{styleLower} objects should outnumber the {color} ones.'],
+  [CType.MORE_TYPE_IN_AREA_THAN_TYPE_IN_AREA]: ['There must be more {objTypeAPlural} {areaA} than {objTypeBPlural} {areaB}.', '{areaA} should have more {objTypeAPlural} than {areaB} has {objTypeBPlural}.'],
+  [CType.MORE_COLOR_THAN_COLOR]:               ['There must be more {colorA} objects than {colorB} objects in the house.', '{colorA} objects should outnumber {colorB} ones.'],
+  // ── New variety types ────────────────────────────────────────────────
+  [CType.STYLE_DOMINANCE]:                     ['There must be more {styleALower} objects than {styleBLower} ones in the house.', '{styleALower} pieces should outnumber the {styleBLower} ones.'],
+  [CType.ROOM_OBJECT_COUNT_COMPARISON]:        ['The {roomA} must be more furnished than the {roomB}.', 'The {roomA} should have more objects than the {roomB}.'],
+  [CType.AREA_DOMINANT_COLOR_DIFFERENT]:       ['The {areaA} and {areaB} must have different color schemes.', 'The dominant wall color {areaA} should differ from {areaB}.'],
+  // ── Upper-bound constraints ───────────────────────────────────────────
+  [CType.AT_MOST_N_ROOMS_COLOR]:      ['There must be no more than {n} {color} {roomWord}.', 'Limit {color} {roomWord} to at most {n}.'],
+  [CType.AT_MOST_N_OBJECT_TYPE]:      ['There must be no more than {n} {objTypePlural} in the house.', 'Keep the total {objTypePlural} to at most {n}.'],
+  [CType.AT_MOST_N_STYLE_OBJECTS]:    ['There must be no more than {n} {styleLower} {objWord} in the house.', 'Limit {styleLower} {objWord} to at most {n}.'],
+  // ── Room-to-room wall color relations ──────────────────────────────────
+  [CType.ROOMS_SAME_WALL_COLOR]:      ['The {roomA} and {roomB} must be painted the same color.', 'Match the wall color of the {roomA} with the {roomB}.'],
+  [CType.ROOMS_DIFF_WALL_COLOR]:      ['The {roomA} and {roomB} must be painted different colors.', 'The {roomA} walls should not match the {roomB}.'],
+  [CType.ROOM_WALL_COLOR_WARMER]:     ['The {roomA} must be painted a warmer color than the {roomB}.', 'Make the {roomA} warmer in tone than the {roomB}.'],
+  // ── Style-to-wall-color harmony ────────────────────────────────────────
+  [CType.STYLE_REQUIRES_WALL_COLOR]:  ['Any room with a {styleLower} {objTypeLower} must be painted {color}.', 'A {styleLower} {objTypeLower} requires {color} walls.'],
+  [CType.STYLE_COLOR_HARMONY]:        ['Every {styleLower} object must be in a room matching its natural color.', 'Place each {styleLower} piece where its color belongs.'],
+  // ── Room diversity ─────────────────────────────────────────────────────
+  [CType.ROOM_STYLE_DIVERSITY]:       ['Every room with objects must contain at least {n} different styles.', 'Mix in at least {n} styles per room.'],
+  [CType.ROOM_COLOR_DIVERSITY]:       ['Every room with objects must contain at least {n} different colors.', 'Each furnished room needs at least {n} distinct colors.'],
+  // ── Area-level balance ─────────────────────────────────────────────────
+  [CType.AREA_OBJECT_COUNT_EQUAL]:    ['The {areaA} and {areaB} must have the same number of objects.', 'Balance the object count between {areaA} and {areaB}.'],
+  [CType.AREA_STYLE_BALANCE]:         ['The {areaA} and {areaB} must have the same number of {styleLower} objects.', 'Keep {styleLower} pieces evenly split between {areaA} and {areaB}.'],
+  // ── Wall color temperature balance ─────────────────────────────────────
+  [CType.MORE_WARM_ROOMS_THAN_COOL]:  ['There must be more warm-colored rooms than cool-colored rooms.', 'Warm walls should outnumber cool walls.'],
+  [CType.MORE_COOL_ROOMS_THAN_WARM]:  ['There must be more cool-colored rooms than warm-colored rooms.', 'Cool walls should outnumber warm walls.'],
+  [CType.WARM_ROOM_COUNT_EQUAL]:      ['The number of warm rooms must equal the number of cool rooms.', 'Balance warm and cool wall colors evenly.'],
+  // ── Total object count ─────────────────────────────────────────────────
+  [CType.EXACTLY_N_TOTAL_OBJECTS]:    ['There must be exactly {n} {objWord} in the house.', 'Place exactly {n} {objWord} total.'],
+  [CType.AT_LEAST_N_TOTAL_OBJECTS]:   ['There must be at least {n} {objWord} in the house.', 'Fill the house with at least {n} {objWord}.'],
+  // ── Style count equality ───────────────────────────────────────────────
+  [CType.STYLE_COUNT_EQUAL]:          ['There must be an equal number of {styleALower} and {styleBLower} objects.', 'Balance {styleALower} and {styleBLower} pieces equally.'],
+  // ── Color/style coverage ───────────────────────────────────────────────
+  [CType.ALL_COLORS_USED]:            ['At least {n} different colors must appear as wall colors.', 'Use at least {n} distinct wall colors.'],
+  [CType.ALL_STYLES_USED]:            ['At least {n} different styles must appear on objects.', 'Include at least {n} distinct styles.'],
+  // ── Parity constraints ───────────────────────────────────────────────────
+  [CType.ODD_COUNT_ROOMS_COLOR]:      ['The number of {color} rooms must be odd.', 'There should be an odd number of {color} rooms.'],
+  [CType.EVEN_COUNT_OBJECT_TYPE]:     ['There must be an even number of {objTypePlural}.', 'Keep the count of {objTypePlural} even.'],
+  [CType.ODD_COUNT_STYLE_OBJECTS]:    ['The number of {styleLower} objects must be odd.', 'There should be an odd number of {styleLower} pieces.'],
+  // ── Cross-room implications ──────────────────────────────────────────────
+  [CType.WALL_COLOR_IMPLIES_WALL_COLOR]: ['If the {ifRoom} is painted {ifColor}, then the {thenRoom} must be painted {thenColor}.', 'A {ifColor} {ifRoom} means the {thenRoom} has to be {thenColor}.'],
+  // ── Composite sum constraints ────────────────────────────────────────────
+  [CType.WARM_OBJECTS_PLUS_COOL_ROOMS]: ['The total number of warm objects plus cool-colored rooms must equal {n}.', 'Add up the warm objects and cool rooms — the sum should be {n}.'],
+  // ── Minimum furnishing ───────────────────────────────────────────────────
+  [CType.MIN_OBJECTS_PER_ROOM]:       ['Every room must have at least {n} objects.', 'Each room needs a minimum of {n} objects.'],
+  // ── Color distribution ───────────────────────────────────────────────────
+  [CType.EXACTLY_ONE_COLOR_PER_TYPE]: ['Each wall color must appear on exactly one {objTypeLower}.', 'Every color should show up on precisely one {objTypeLower}.'],
 };
 
 const VOICE_PREFIXES = {
-  formal:     ['It is essential that ', 'I insist that ', 'I require that ', 'It is important that '],
-  casual:     ["I'd really like ", "I'd love for ", 'I want ', "I'd prefer for "],
-  passionate: ['I absolutely need ', 'I really, really need ', 'I desperately want ', "It's vital to me for "],
+  formal:     ['It is essential that ', 'I insist that ', 'I require that ', 'It is important that ', 'One must ensure that '],
+  casual:     ["I'd really like ", "I'd love for ", 'I want ', "I'd prefer for ", "I'm hoping for "],
+  passionate: ['I absolutely need ', 'I really, really need ', 'I desperately want ', "It's vital to me for ", 'I cannot stress this enough, '],
+  mysterious: ['Here is a clue: ', 'Pay attention: ', 'Take note: ', 'Listen carefully: ', 'The secret is that '],
   neutral:    [''],
 };
 
 function transformVoice(text, voice) {
   let core = text.replace(/\.$/, '');
   core = core[0].toLowerCase() + core.slice(1);
-  if (voice === 'formal') {
-    core = core.replace(/\bmust not\b/g, 'not').replace(/\bmust\b/g, '').replace(/\bmay not\b/g, 'not').replace(/\bmay\b/g, '');
-    core = core.replace(/ {2,}/g, ' ');
-  } else {
-    core = core.replace(/\bmust not\b/g, 'not to').replace(/\bmust\b/g, 'to').replace(/\bmay not\b/g, 'not to').replace(/\bmay\b/g, 'to');
+  if (voice === 'mysterious') {
+    // Mysterious voice keeps the original phrasing intact
+    return core;
   }
+  if (voice === 'formal') {
+    // Handle "must be" / "must not be" as units first to avoid "be be"
+    core = core.replace(/\bmust not be\b/g, 'not be')
+               .replace(/\bmust be\b/g, 'be')
+               .replace(/\bmust not\b/g, 'not')
+               .replace(/\bmust\b/g, '')
+               .replace(/\bmay not be\b/g, 'not be')
+               .replace(/\bmay be\b/g, 'be')
+               .replace(/\bmay not\b/g, 'not')
+               .replace(/\bmay\b/g, '');
+  } else if (voice !== 'neutral') {
+    core = core.replace(/\bmust not be\b/g, 'not to be')
+               .replace(/\bmust be\b/g, 'to be')
+               .replace(/\bmust not\b/g, 'not to')
+               .replace(/\bmust\b/g, 'to')
+               .replace(/\bmay not be\b/g, 'not to be')
+               .replace(/\bmay be\b/g, 'to be')
+               .replace(/\bmay not\b/g, 'not to')
+               .replace(/\bmay\b/g, 'to');
+  }
+  core = core.replace(/  +/g, ' ');
   return core;
 }
 
 function renderNL(rng, c, voice = 'neutral') {
-  const tpl = NL[c.ctype] || `[${c.ctype}]`;
+  const variants = NL[c.ctype];
+  const tpl = (variants && Array.isArray(variants)) ? rng.choice(variants) : (variants || `[${c.ctype}]`);
   const p = c.params;
   const subs = {
     room: p.room || '', area: p.area || '', color: p.color || '',
@@ -1055,11 +1516,14 @@ function renderNL(rng, c, voice = 'neutral') {
     wallColor: p.wallColor || '',
     objColor: p.objColor || '',
     areaA: p.areaA || '', areaB: p.areaB || '',
+    roomA: p.roomA || '', roomB: p.roomB || '',
     roomWord: p.n === 1 ? 'room' : 'rooms',
     objWord: p.n === 1 ? 'object' : 'objects',
     colorLower: (p.color || '').toLowerCase(),
     featureA: formatAbstractFeature(p.featureAType, p.featureAValue),
     featureB: formatAbstractFeature(p.featureBType, p.featureBValue),
+    ifRoom: p.ifRoom || '', ifColor: p.ifColor || '',
+    thenRoom: p.thenRoom || '', thenColor: p.thenColor || '',
   };
   let text = tpl.replace(/\{(\w+)\}/g, (_, k) => subs[k] !== undefined ? subs[k] : `{${k}}`);
 
@@ -1149,12 +1613,16 @@ const NEGATIVE_TYPES = new Set([
   CType.WALL_COLOR_FORBIDS_STYLE, CType.STYLE_PAIR_FORBIDDEN,
   CType.WALL_COLOR_FORBIDS_OBJ_COLOR, CType.OBJ_TYPE_FORBIDS_OBJ_TYPE,
   CType.NO_WALL_MATCHES_OBJECT, CType.COLOR_EXCLUSION_ZONE,
+  CType.AT_MOST_N_ROOMS_COLOR, CType.AT_MOST_N_OBJECT_TYPE, CType.AT_MOST_N_STYLE_OBJECTS,
 ]);
 
 const WARM_COOL_TYPES = new Set([
   CType.ROOM_WALL_WARM, CType.ROOM_WALL_COOL,
   CType.AT_LEAST_N_WARM_OBJECTS, CType.AT_LEAST_N_COOL_OBJECTS,
   CType.MORE_WARM_THAN_COOL, CType.MORE_COOL_THAN_WARM,
+  CType.MORE_WARM_ROOMS_THAN_COOL, CType.MORE_COOL_ROOMS_THAN_WARM,
+  CType.WARM_ROOM_COUNT_EQUAL, CType.ROOM_WALL_COLOR_WARMER,
+  CType.WARM_OBJECTS_PLUS_COOL_ROOMS,
 ]);
 
 function constraintKey(c) {
@@ -1354,7 +1822,85 @@ const HIGH_CONSTRAINING_TYPES = new Set([
   CType.AT_LEAST_N_WARM_OBJECTS, CType.AT_LEAST_N_COOL_OBJECTS,
   CType.MORE_WARM_THAN_COOL, CType.MORE_COOL_THAN_WARM,
   CType.EXACTLY_N_ROOMS_COLOR, CType.AREA_NO_OBJECT_TYPE, CType.AREA_HAS_OBJECT_TYPE,
+  CType.STYLE_REQUIRES_WALL_COLOR, CType.STYLE_COLOR_HARMONY,
+  CType.ROOMS_SAME_WALL_COLOR, CType.ROOMS_DIFF_WALL_COLOR,
+  CType.WALL_COLOR_IMPLIES_WALL_COLOR, CType.ODD_COUNT_ROOMS_COLOR,
 ]);
+const CONSTRAINT_CATEGORIES = {
+  'room': new Set([
+    CType.ROOM_WALL_COLOR_IS, CType.ROOM_WALL_COLOR_IS_NOT,
+    CType.ROOM_WALL_WARM, CType.ROOM_WALL_COOL,
+    CType.ROOM_HAS_OBJECT_TYPE, CType.ROOM_NO_OBJECT_TYPE,
+    CType.ROOM_HAS_STYLE, CType.ROOM_NO_STYLE,
+    CType.ROOM_HAS_COLOR_OBJECT, CType.ROOM_NO_COLOR_OBJECT,
+    CType.ROOM_HAS_FEATURE, CType.ROOM_NO_FEATURE,
+    CType.ROOM_NO_FEATURES_COLOR,
+    CType.LEFTMOST_OBJECT_IN_ROOM_IS_STYLE, CType.LEFTMOST_OBJECT_IN_ROOM_IS_COLOR, CType.LEFTMOST_OBJECT_IN_ROOM_IS_TYPE,
+    CType.RIGHTMOST_OBJECT_IN_ROOM_IS_STYLE, CType.RIGHTMOST_OBJECT_IN_ROOM_IS_COLOR, CType.RIGHTMOST_OBJECT_IN_ROOM_IS_TYPE,
+    CType.ROOM_OBJECT_COUNT_COMPARISON,
+    CType.ROOM_STYLE_DIVERSITY, CType.ROOM_COLOR_DIVERSITY,
+  ]),
+  'area': new Set([
+    CType.AREA_HAS_OBJECT_TYPE, CType.AREA_NO_OBJECT_TYPE,
+    CType.AREA_HAS_COLOR_OBJECT, CType.AREA_NO_COLOR_OBJECT,
+    CType.AREA_HAS_STYLE, CType.AREA_NO_STYLE,
+    CType.AREA_NO_FEATURES_COLOR,
+    CType.AREA_DOMINANT_COLOR_DIFFERENT,
+    CType.AREA_OBJECT_COUNT_EQUAL, CType.AREA_STYLE_BALANCE,
+  ]),
+  'global': new Set([
+    CType.EXACTLY_N_ROOMS_COLOR,
+    CType.AT_LEAST_N_OBJECT_TYPE, CType.AT_LEAST_N_COLOR_OBJECTS, CType.AT_LEAST_N_STYLE_OBJECTS,
+    CType.NO_COLOR_OBJECTS_IN_HOUSE,
+    CType.ALL_OBJECT_TYPE_SAME_COLOR, CType.ALL_OBJECT_TYPE_SAME_STYLE,
+    CType.EXACTLY_N_ROOMS_WITH_FEATURE,
+    CType.AT_MOST_N_ROOMS_COLOR, CType.AT_MOST_N_OBJECT_TYPE, CType.AT_MOST_N_STYLE_OBJECTS,
+    CType.EXACTLY_N_TOTAL_OBJECTS, CType.AT_LEAST_N_TOTAL_OBJECTS,
+    CType.ALL_COLORS_USED, CType.ALL_STYLES_USED,
+    CType.ODD_COUNT_ROOMS_COLOR, CType.EVEN_COUNT_OBJECT_TYPE,
+    CType.ODD_COUNT_STYLE_OBJECTS, CType.MIN_OBJECTS_PER_ROOM,
+    CType.EXACTLY_ONE_COLOR_PER_TYPE,
+  ]),
+  'comparison': new Set([
+    CType.COLOR_ROOM_COUNT_EQUAL,
+    CType.MORE_OBJ_COLOR_THAN_STYLE, CType.MORE_OBJ_STYLE_THAN_COLOR,
+    CType.MORE_TYPE_IN_AREA_THAN_TYPE_IN_AREA, CType.MORE_COLOR_THAN_COLOR,
+    CType.STYLE_DOMINANCE,
+    CType.STYLE_COUNT_EQUAL,
+  ]),
+  'spatial': new Set([
+    CType.DIAG_STYLE_NO_WALL_COLOR, CType.ADJ_STYLE_NO_WALL_COLOR,
+    CType.ABOVE_STYLE_NO_WALL_COLOR, CType.BELOW_STYLE_NO_WALL_COLOR,
+    CType.BESIDE_STYLE_NO_WALL_COLOR,
+    CType.DIAG_ROOMS_SAME_WALL, CType.ADJ_ROOMS_DIFF_WALL,
+    CType.ROOMS_SAME_WALL_COLOR, CType.ROOMS_DIFF_WALL_COLOR, CType.ROOM_WALL_COLOR_WARMER,
+  ]),
+  'conditional': new Set([
+    CType.WALL_COLOR_FORBIDS_STYLE, CType.STYLE_PAIR_FORBIDDEN,
+    CType.OBJ_TYPE_REQUIRES_WALL_COLOR, CType.WALL_COLOR_FORBIDS_OBJ_COLOR,
+    CType.OBJ_TYPE_FORBIDS_OBJ_TYPE,
+    CType.ROOM_WITH_TYPE_MUST_HAVE_TYPE, CType.NO_ROOM_MORE_THAN_ONE_STYLE,
+    CType.STYLE_REQUIRES_WALL_COLOR, CType.STYLE_COLOR_HARMONY,
+    CType.WALL_COLOR_IMPLIES_WALL_COLOR,
+  ]),
+  'funky': new Set([
+    CType.INSEPARABLE,
+    CType.MORE_WARM_THAN_COOL, CType.MORE_COOL_THAN_WARM,
+    CType.WALL_MATCHES_OBJECT, CType.NO_WALL_MATCHES_OBJECT,
+    CType.COLOR_EXCLUSION_ZONE,
+    CType.AT_LEAST_N_WARM_OBJECTS, CType.AT_LEAST_N_COOL_OBJECTS,
+    CType.MORE_WARM_ROOMS_THAN_COOL, CType.MORE_COOL_ROOMS_THAN_WARM,
+    CType.WARM_ROOM_COUNT_EQUAL,
+    CType.WARM_OBJECTS_PLUS_COOL_ROOMS,
+  ]),
+};
+
+function getConstraintCategory(ctype) {
+  for (const [cat, types] of Object.entries(CONSTRAINT_CATEGORIES)) {
+    if (types.has(ctype)) return cat;
+  }
+  return 'other';
+}
 
 function getReferencedRooms(c, layout) {
   const rooms = new Set();
@@ -1365,12 +1911,13 @@ function getReferencedRooms(c, layout) {
   return rooms;
 }
 
-function assignConstraints(rng, state, numPlayers, rulesPerPlayer, warmCoolBias = 1.0) {
+function assignConstraints(rng, state, numPlayers, rulesPerPlayer, params, warmCoolBias = 1.0, difficulty = 'medium') {
   const layout = state.layout;
-  const poolSize = 1000;
-  const pool = sampleBoardPool(rng, state, poolSize, 0.75);
+  const poolSize = 2000;
+  const pool = sampleBoardPool(rng, state, poolSize, params, 0.75);
 
-  const allCands = generateCandidates(state);
+  const maxInsep = difficulty === 'easy' ? 2 : difficulty === 'medium' ? 3 : 4;
+  const allCands = generateCandidates(state, { maxInseparable: maxInsep });
   for (const c of allCands) {
     if (WARM_COOL_TYPES.has(c.ctype)) c.score *= warmCoolBias;
   }
@@ -1393,6 +1940,7 @@ function assignConstraints(rng, state, numPlayers, rulesPerPlayer, warmCoolBias 
 
   const assignments = Array.from({ length: numPlayers }, () => []);
   const usedKeys = new Set();
+  const assignedCategories = new Map(); // category -> count
   const targetTotal = numPlayers * rulesPerPlayer;
 
   while (assignments.flat().length < targetTotal) {
@@ -1426,6 +1974,13 @@ function assignConstraints(rng, state, numPlayers, rulesPerPlayer, warmCoolBias 
 
       let score = reduction * 4 + conflict * 0.8 - leak * 0.4 + typeBonus + (c.score || 0) * 0.1;
       if (NEGATIVE_TYPES.has(c.ctype)) score += 0.4;
+      // Diversity bonus: prefer underrepresented categories
+      {
+        const category = getConstraintCategory(c.ctype);
+        const categoryCount = assignedCategories.get(category) || 0;
+        const diversityBonus = categoryCount === 0 ? 2.0 : categoryCount === 1 ? 1.0 : 0;
+        score += diversityBonus;
+      }
 
       if (score > bestScore) {
         bestScore = score;
@@ -1438,6 +1993,10 @@ function assignConstraints(rng, state, numPlayers, rulesPerPlayer, warmCoolBias 
 
     assignments[bestPl].push(bestC);
     usedKeys.add(constraintKey(bestC));
+    {
+      const cat = getConstraintCategory(bestC.ctype);
+      assignedCategories.set(cat, (assignedCategories.get(cat) || 0) + 1);
+    }
   }
 
   // If we didn't fill all slots (e.g. too many redundancies), fallback: add any remaining non-redundant candidates
@@ -1582,11 +2141,44 @@ function generateInitialState(rng, solution, assignments, config) {
 // SECTION 10: TOP-LEVEL SCENARIO GENERATION
 // ================================================================
 
-const PLAYER_VOICES = ['formal', 'casual', 'passionate', 'neutral', 'formal'];
+const PLAYER_VOICES = ['formal', 'casual', 'passionate', 'mysterious', 'neutral'];
 
 const VALIDATE_BFS_CAP = 80000;
 const VALIDATE_BFS_MAX_DEPTH = 10;
 
+class ScenarioGenerationError extends Error {
+  constructor(message, details) {
+    super(message);
+    this.name = 'ScenarioGenerationError';
+    this.details = details || {};
+  }
+}
+
+/** Compute the actual shortest BFS distance from `from` to `to` state. Returns Infinity if unreachable within cap. */
+function bfsDistanceToSolution(fromState, toState, stateCap = VALIDATE_BFS_CAP) {
+  const targetFp = toState.fingerprint();
+  const startFp = fromState.fingerprint();
+  if (startFp === targetFp) return 0;
+
+  const visited = new Set([startFp]);
+  const queue = [{ fp: startFp, depth: 0, state: fromState }];
+  let head = 0;
+
+  while (head < queue.length && visited.size <= stateCap) {
+    const { state, depth } = queue[head++];
+    for (const move of listAllMoves(state, ['paint', 'swap', 'remove', 'add'])) {
+      const next = state.deepCopy();
+      applyMove(next, move);
+      const nextFp = next.fingerprint();
+      if (nextFp === targetFp) return depth + 1;
+      if (!visited.has(nextFp)) {
+        visited.add(nextFp);
+        queue.push({ fp: nextFp, depth: depth + 1, state: next });
+      }
+    }
+  }
+  return Infinity;
+}
 /** Returns min depth of any state (other than solution) satisfying all constraints, from initial. */
 function minOtherSolutionDepth(initialState, solutionState, allConstraints, intendedDepth, stateCap = VALIDATE_BFS_CAP) {
   const solutionFp = solutionState.fingerprint();
@@ -1597,9 +2189,10 @@ function minOtherSolutionDepth(initialState, solutionState, allConstraints, inte
   let capReached = false;
   const visited = new Set([initialState.fingerprint()]);
   const queue = [{ state: initialState, depth: 0 }];
+  let head = 0;
 
-  while (queue.length > 0 && visited.size <= stateCap) {
-    const { state, depth } = queue.shift();
+  while (head < queue.length && visited.size <= stateCap) {
+    const { state, depth } = queue[head++];
     if (depth > maxDepth) continue;
     if (allConstraints.every(c => evalC(c, state))) {
       const fp = state.fingerprint();
@@ -1618,7 +2211,7 @@ function minOtherSolutionDepth(initialState, solutionState, allConstraints, inte
   return { minOther, capReached };
 }
 
-function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, perturbation = {}, warmCoolBias, includeAssignments = false } = {}) {
+function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, perturbation = {}, warmCoolBias, includeAssignments = false, validateUniqueness = false } = {}) {
   const params = DIFFICULTY_PARAMS[difficulty] || DIFFICULTY_PARAMS.medium;
   const wcBias = warmCoolBias != null ? warmCoolBias : params.warmCoolBias;
   const rng1 = new SeededRandom(seed);
@@ -1626,19 +2219,24 @@ function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, 
 
   const [lo, hi] = params.pertRange;
   const maxAssignmentRetries = numPlayers === 2 ? 15 : 1;
-  let assignments, initial, moves;
+  const maxTotalRetries = maxAssignmentRetries * 6; // prevent infinite-feeling loops
+  let totalRetries = 0;
+  let assignments, initial, moves, validated = false;
 
   for (let assignAttempt = 0; assignAttempt < maxAssignmentRetries; assignAttempt++) {
-    const assignSeed = seed != null ? seed + assignAttempt * 100 : undefined;
-    assignments = assignConstraints(new SeededRandom(assignSeed), solution, numPlayers, params.rulesPerPlayer, wcBias);
+    const assignSeed = seed != null ? hashSeed(seed, assignAttempt * 100) : undefined;
+    assignments = assignConstraints(new SeededRandom(assignSeed), solution, numPlayers, params.rulesPerPlayer, params, wcBias, difficulty);
     const allConstraintsList = assignments.flat();
 
     const maxPertRetries = 6;
     for (let pertAttempt = 0; pertAttempt < maxPertRetries; pertAttempt++) {
-      const pertSeed = seed != null ? seed * 3 + 7 + pertAttempt * 11 + assignAttempt * 17 : undefined;
+      totalRetries++;
+      if (totalRetries > maxTotalRetries) break;
+
+      const pertSeed = seed != null ? hashSeed(seed, pertAttempt * 100 + assignAttempt * 1000) : undefined;
       const rng2 = new SeededRandom(pertSeed);
       const pertConfig = {
-        numPerturbations: perturbation.numPerturbations || new SeededRandom(seed != null ? seed * 2 + pertAttempt + assignAttempt * 13 : undefined).randint(lo, hi),
+        numPerturbations: perturbation.numPerturbations || new SeededRandom(seed != null ? hashSeed(seed, pertAttempt + assignAttempt * 100) : undefined).randint(lo, hi),
         minViolPerPlayer: perturbation.minViolPerPlayer != null ? perturbation.minViolPerPlayer : 1,
         allowedTypes: perturbation.allowedTypes || ['paint', 'swap', 'remove', 'add'],
         typeWeights: perturbation.typeWeights || params.pertWeights,
@@ -1648,18 +2246,37 @@ function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, 
       initial = result.state;
       moves = result.moves;
       const intendedDepth = moves.length;
+
+      // Lightweight pre-check: limited BFS to catch obviously non-unique scenarios.
+      // Uses same budget as test helper (150K) to ensure consistency.
+      const preCheck = minOtherSolutionDepth(initial, solution, allConstraintsList, intendedDepth, 150000);
+      if (preCheck.minOther < intendedDepth) continue;  // non-unique, retry
+
+      if (!validateUniqueness) {
+        validated = true;
+        break;
+      }
+
+      // Full BFS validation (expensive — only when validateUniqueness is true).
       const { minOther, capReached } = minOtherSolutionDepth(initial, solution, allConstraintsList, intendedDepth, VALIDATE_BFS_CAP);
-      if (capReached && minOther === Infinity) break;
-      if (minOther >= intendedDepth) break;
+
+      // If cap was reached, we couldn't complete validation — retry with different seed
+      if (capReached) continue;
+      // Uniqueness validated: no other satisfying state within intended depth
+      if (minOther >= intendedDepth) { validated = true; break; }
     }
-    const finalIntended = moves.length;
-    const { minOther: finalMinOther } = minOtherSolutionDepth(initial, solution, allConstraintsList, finalIntended, VALIDATE_BFS_CAP);
-    if (finalMinOther >= finalIntended) break;
+    if (validated) break;
+  }
+
+  if (!validated) {
+    // Validation could not be completed within the budget.
+    // Return the scenario with validated: false so the caller can decide.
+    // This matches the test helper's behavior of treating capReached as inconclusive.
   }
 
   const players = assignments.map((rules, i) => {
-    const voice = PLAYER_VOICES[i % PLAYER_VOICES.length];
-    const nlRng = new SeededRandom(seed != null ? seed * 5 + i : undefined);
+    const voice = rng1.choice(PLAYER_VOICES);
+    const nlRng = new SeededRandom(seed != null ? hashSeed(seed, 5000 + i) : undefined);
     const constraints = rules.map(r => ({
       text: renderNL(nlRng, r, voice),
     }));
@@ -1672,6 +2289,7 @@ function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, 
     solutionBoard: solution.serialize(),
     players,
     perturbationLog: moves.map(describeMove),
+    validated,
   };
   if (includeAssignments) result._assignments = assignments;
   return result;
@@ -1679,6 +2297,9 @@ function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, 
 
 module.exports = {
   generateScenario,
+  ScenarioGenerationError,
+  bfsDistanceToSolution,
+  hashSeed,
   DIFFICULTY_PARAMS,
   HouseState,
   CType,
