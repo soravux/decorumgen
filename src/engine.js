@@ -2183,10 +2183,12 @@ function bfsDistanceToSolution(fromState, toState, stateCap = VALIDATE_BFS_CAP) 
 function minOtherSolutionDepth(initialState, solutionState, allConstraints, intendedDepth, stateCap = VALIDATE_BFS_CAP) {
   const solutionFp = solutionState.fingerprint();
   const maxDepth = Math.min(intendedDepth - 1, VALIDATE_BFS_MAX_DEPTH);
-  if (maxDepth < 0) return { minOther: Infinity, capReached: false };
+  if (maxDepth < 0) return { minOther: Infinity, capReached: false, statesExplored: 1, maxDepthReached: 0 };
 
   let minOther = Infinity;
   let capReached = false;
+  let statesExplored = 1; // initial state
+  let maxDepthReached = 0;
   const visited = new Set([initialState.fingerprint()]);
   const queue = [{ state: initialState, depth: 0 }];
   let head = 0;
@@ -2194,6 +2196,7 @@ function minOtherSolutionDepth(initialState, solutionState, allConstraints, inte
   while (head < queue.length && visited.size <= stateCap) {
     const { state, depth } = queue[head++];
     if (depth > maxDepth) continue;
+    if (depth > maxDepthReached) maxDepthReached = depth;
     if (allConstraints.every(c => evalC(c, state))) {
       const fp = state.fingerprint();
       if (fp !== solutionFp && depth < minOther) minOther = depth;
@@ -2204,11 +2207,12 @@ function minOtherSolutionDepth(initialState, solutionState, allConstraints, inte
       const nextFp = next.fingerprint();
       if (visited.has(nextFp)) continue;
       visited.add(nextFp);
+      statesExplored++;
       queue.push({ state: next, depth: depth + 1 });
       if (visited.size > stateCap) { capReached = true; break; }
     }
   }
-  return { minOther, capReached };
+  return { minOther, capReached, statesExplored, maxDepthReached };
 }
 
 function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, perturbation = {}, warmCoolBias, includeAssignments = false, validateUniqueness = false } = {}) {
@@ -2222,6 +2226,7 @@ function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, 
   const maxTotalRetries = maxAssignmentRetries * 6; // prevent infinite-feeling loops
   let totalRetries = 0;
   let assignments, initial, moves, validated = false;
+  let lastValidation = null;
 
   for (let assignAttempt = 0; assignAttempt < maxAssignmentRetries; assignAttempt++) {
     const assignSeed = seed != null ? hashSeed(seed, assignAttempt * 100) : undefined;
@@ -2250,6 +2255,7 @@ function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, 
       // Lightweight pre-check: limited BFS to catch obviously non-unique scenarios.
       // Uses same budget as test helper (150K) to ensure consistency.
       const preCheck = minOtherSolutionDepth(initial, solution, allConstraintsList, intendedDepth, 150000);
+      lastValidation = { ...preCheck, bfsCap: 150000, intendedDepth: moves.length };
       if (preCheck.minOther < intendedDepth) continue;  // non-unique, retry
 
       if (!validateUniqueness) {
@@ -2258,12 +2264,13 @@ function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, 
       }
 
       // Full BFS validation (expensive — only when validateUniqueness is true).
-      const { minOther, capReached } = minOtherSolutionDepth(initial, solution, allConstraintsList, intendedDepth, VALIDATE_BFS_CAP);
+      const fullCheck = minOtherSolutionDepth(initial, solution, allConstraintsList, intendedDepth, VALIDATE_BFS_CAP);
+      lastValidation = { ...fullCheck, bfsCap: VALIDATE_BFS_CAP, intendedDepth: moves.length };
 
       // If cap was reached, we couldn't complete validation — retry with different seed
-      if (capReached) continue;
+      if (fullCheck.capReached) continue;
       // Uniqueness validated: no other satisfying state within intended depth
-      if (minOther >= intendedDepth) { validated = true; break; }
+      if (fullCheck.minOther >= intendedDepth) { validated = true; break; }
     }
     if (validated) break;
   }
@@ -2290,6 +2297,14 @@ function generateScenario({ numPlayers = 2, difficulty = 'medium', seed = null, 
     players,
     perturbationLog: moves.map(describeMove),
     validated,
+    validation: lastValidation ? {
+      statesExplored: lastValidation.statesExplored,
+      maxDepthReached: lastValidation.maxDepthReached,
+      intendedDepth: lastValidation.intendedDepth,
+      minOtherSolutionDepth: lastValidation.minOther,
+      capReached: lastValidation.capReached,
+      bfsCap: lastValidation.bfsCap,
+    } : null,
   };
   if (includeAssignments) result._assignments = assignments;
   return result;

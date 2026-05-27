@@ -61,6 +61,8 @@ app.get('/api/scenario/:token/solution', (req, res) => {
   res.json({
     solutionBoard: scenario.solutionBoard,
     perturbationLog: scenario.perturbationLog,
+    validation: scenario.validation,
+    validated: scenario.validated,
   });
 });
 

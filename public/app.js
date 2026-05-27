@@ -170,6 +170,7 @@
       if (!solutionArea.hidden) {
         solutionArea.hidden = true;
         logEl.innerHTML = '';
+        document.getElementById('validationArea').hidden = true;
         revealBtn.textContent = 'Reveal Solution';
         return;
       }
@@ -184,6 +185,7 @@
           li.innerHTML = injectTermSymbols(desc);
           logEl.appendChild(li);
         });
+        renderValidation(sol.validation, sol.validated);
         solutionArea.hidden = false;
         revealBtn.textContent = 'Hide Solution';
       } catch (e) {
@@ -243,6 +245,35 @@
       card.appendChild(el);
     }
     return card;
+  }
+  // ── Render validation summary ─────────────────────────────
+  function renderValidation(validation, validated) {
+    const area = document.getElementById('validationArea');
+    const summary = document.getElementById('validationSummary');
+    if (!validation) { area.hidden = true; return; }
+
+    area.hidden = false;
+    summary.innerHTML = '';
+
+    const fmt = (n) => n.toLocaleString();
+    const lines = [];
+
+    if (validated) {
+      lines.push(`<div class="validation-status ok"><span class="validation-icon">&#10003;</span> Solution verified as unique</div>`);
+      lines.push(`<div class="validation-detail">Explored ${fmt(validation.statesExplored)} board states up to depth ${validation.maxDepthReached}</div>`);
+      lines.push(`<div class="validation-detail">No alternative solution found within ${validation.intendedDepth} moves</div>`);
+      lines.push(`<div class="validation-hint">(intended solution requires exactly ${validation.intendedDepth} moves)</div>`);
+    } else if (validation.capReached) {
+      lines.push(`<div class="validation-status warn"><span class="validation-icon">&#9888;</span> Validation incomplete &mdash; search budget exhausted</div>`);
+      lines.push(`<div class="validation-detail">Explored ${fmt(validation.statesExplored)} board states up to depth ${validation.maxDepthReached}</div>`);
+      lines.push(`<div class="validation-detail">No alternative found, but proof is inconclusive</div>`);
+    } else {
+      // validated is false for other reasons
+      lines.push(`<div class="validation-status warn"><span class="validation-icon">&#9888;</span> Uniqueness validation failed</div>`);
+      lines.push(`<div class="validation-detail">Explored ${fmt(validation.statesExplored)} board states up to depth ${validation.maxDepthReached}</div>`);
+    }
+
+    summary.innerHTML = lines.join('');
   }
 
   function setupYourNameInput(currentPlayerId) {

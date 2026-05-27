@@ -299,6 +299,15 @@ input[type="range"] { width: 100%; margin: 0.3rem 0; accent-color: #a08020; }
 .pert-log { padding-left: 1.5rem; font-size: 0.85rem; color: #9a9894; }
 .pert-log li { margin: 0.25rem 0; }
 
+/* ── Validation Panel ────────────────────────────────── */
+.validation-card { margin-top: 1rem; }
+.validation-card h2 { font-size: 1.1rem; color: #f0ede8; margin-bottom: 0.6rem; }
+.validation-status { font-size: 0.95rem; margin-bottom: 0.3rem; display: flex; align-items: center; gap: 0.4rem; }
+.validation-status.ok { color: #0db14b; }
+.validation-status.warn { color: #ffc82f; }
+.validation-icon { font-size: 1.1rem; flex-shrink: 0; }
+.validation-detail { font-size: 0.88rem; color: #b8b6b2; margin: 0.15rem 0; }
+.validation-hint { font-size: 0.82rem; color: #6a6864; font-style: italic; margin-top: 0.2rem; }
 /* ── Responsive ──────────────────────────────────────── */
 @media (max-width: 500px) {
   .house-grid { grid-template-columns: 1fr; }
